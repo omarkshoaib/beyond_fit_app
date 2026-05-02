@@ -6,6 +6,12 @@ from sqlmodel import Session, create_engine, SQLModel
 from app.settings import get_settings
 from app.container import Container
 from app.routes import router
+from app.api.auth import router as auth_router
+from app.api.plans import router as plans_router
+from app.api.profile import router as profile_router
+from app.api.checkin import router as checkin_router
+from app.api.progress import router as progress_router
+from app.api.nutrition import router as nutrition_router
 
 
 def _make_engine(database_url: str):
@@ -34,6 +40,12 @@ def get_app() -> FastAPI:
         return {"status": "healthy", "service": "coaching-engine"}
 
     app.include_router(router)
+    app.include_router(auth_router, prefix="/api/v1")
+    app.include_router(plans_router, prefix="/api/v1")
+    app.include_router(profile_router, prefix="/api/v1")
+    app.include_router(checkin_router, prefix="/api/v1")
+    app.include_router(progress_router, prefix="/api/v1")
+    app.include_router(nutrition_router, prefix="/api/v1")
     return app
 
 

@@ -342,7 +342,38 @@ class WorkoutGenerator:
             pattern = exercise.movement_pattern
             is_compound = exercise.fatigue_cost >= 3
 
-            warmup: List[WarmupSet] = []
+            slot = WorkoutSlot(
+                slot_type=slot_type,
+                exercise_id=exercise.exercise_id,
+                exercise_name=exercise.name,
+                sets=n_sets,
+                reps=reps,
+                rpe=int(slot_rpe),
+                rest_seconds=REST_BY_FATIGUE.get(exercise.fatigue_cost, 90),
+                tempo=TEMPO_BY_PATTERN.get(pattern),
+                coaching_cues=CUES_BY_PATTERN.get(pattern, []),
+                warmup_sets=[],
+                biomechanical_focus=exercise.biomechanical_focus,
+            )
+
+            if prior_week:
+                for d in prior_week.days:
+                    for prev_slot in d.slots:
+                        if prev_slot.exercise_id == exercise.exercise_id and prev_slot.actual_weight is not None:
+                            try:
+                                slot.target_weight = AutoRegulator.calculate_next_load(
+                                    last_weight=float(prev_slot.actual_weight),
+                                    last_target_rpe=float(prev_slot.rpe),
+                                    last_actual_rpe=float(prev_slot.actual_rpe) if prev_slot.actual_rpe else float(prev_slot.rpe),
+                                    next_target_rpe=float(slot_rpe),
+                                )
+                            except (TypeError, ValueError, AttributeError) as e:
+                                logger.warning("load_progression_lookup_failed: %s", e)
+                            break
+                    else:
+                        continue
+                    break
+
             if is_compound:
                 is_main = slot_type == "main_compound" and not first_compound_done[0]
                 last_top: Optional[float] = None
@@ -359,48 +390,16 @@ class WorkoutGenerator:
                     working_reps = 5
 
                 raw_warmup = build_warmup(
-                    working_load_kg=100.0,
+                    working_load_kg=slot.target_weight if slot.target_weight else 60.0,
                     bar_kg=20.0,
                     working_reps=working_reps,
                     is_compound=True,
                     is_main_lift=is_main,
                     last_top_set_kg=last_top,
                 )
-                warmup = [WarmupSet(**vars(ws)) for ws in raw_warmup]
+                slot.warmup_sets = [WarmupSet(**vars(ws)) for ws in raw_warmup]
                 if is_main:
                     first_compound_done[0] = True
-
-            slot = WorkoutSlot(
-                slot_type=slot_type,
-                exercise_id=exercise.exercise_id,
-                exercise_name=exercise.name,
-                sets=n_sets,
-                reps=reps,
-                rpe=int(slot_rpe),
-                rest_seconds=REST_BY_FATIGUE.get(exercise.fatigue_cost, 90),
-                tempo=TEMPO_BY_PATTERN.get(pattern),
-                coaching_cues=CUES_BY_PATTERN.get(pattern, []),
-                warmup_sets=warmup,
-                biomechanical_focus=exercise.biomechanical_focus,
-            )
-
-            if prior_week:
-                for d in prior_week.days:
-                    for prev_slot in d.slots:
-                        if prev_slot.exercise_id == exercise.exercise_id and prev_slot.actual_weight is not None:
-                            try:
-                                slot.target_weight = AutoRegulator.calculate_next_load(
-                                    last_weight=float(prev_slot.actual_weight),
-                                    last_target_rpe=float(prev_slot.rpe),
-                                    last_actual_rpe=float(prev_slot.actual_rpe) if prev_slot.actual_rpe else float(prev_slot.rpe),
-                                    next_target_rpe=float(slot_rpe),
-                                )
-                            except Exception:
-                                pass
-                            break
-                    else:
-                        continue
-                    break
 
             return slot
 
@@ -424,6 +423,7 @@ class WorkoutGenerator:
 
             slot = _construct_slot(ex, n_sets, reps_str, rpe, spec["type"])
             slot.slot_order = i + 1
+            slot.slot_type = "main_compound" if i == 0 else "secondary_compound" if i == 1 else "isolation"
 
             if deload and slot.target_weight is not None:
                 slot.target_weight = round((slot.target_weight * load_factor) / 2.5) * 2.5

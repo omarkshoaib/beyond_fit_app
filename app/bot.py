@@ -1058,6 +1058,9 @@ async def _process_checkin(
     # Write telemetry back onto the workout JSON
     with Session(engine, expire_on_commit=False) as session:
         history = session.get(WorkoutHistory, context.user_data["checkin_history_id"])
+        if history is None:
+            logging.warning("client_not_found: WorkoutHistory %s", context.user_data.get("checkin_history_id"))
+            return ConversationHandler.END
         prior_week = WorkoutWeek.model_validate_json(history.workout_json)
 
         if extraction and extraction.exercises:
@@ -1078,6 +1081,9 @@ async def _process_checkin(
             prior_week = week_obj
 
         client = session.get(ClientProfile, client_id)
+        if client is None:
+            logging.warning("client_not_found: %s", client_id)
+            return ConversationHandler.END
         client.week_number += 1
         session.add(client)
         session.commit()
@@ -2030,6 +2036,10 @@ async def _do_approve_confirmed(query, approval_id: str, context: ContextTypes.D
 
         workout = WorkoutWeek.model_validate_json(pending.workout_json)
         profile = session.get(ClientProfile, pending.client_id)
+        if profile is None:
+            logging.warning("client_not_found: %s", pending.client_id)
+            await query.edit_message_text("❌ Client profile not found — cannot approve.")
+            return
 
     # ── 1. Render PDF (outside transaction — safe to fail and retry) ──────────
     transient_history = WorkoutHistory(
@@ -2139,7 +2149,12 @@ async def handle_admin_feedback(update: Update, context: ContextTypes.DEFAULT_TY
             llm = FlashCommunicationService()
             mutated_json = llm.apply_coach_edits(pending.workout_json, feedback)
             new_workout = WorkoutWeek.model_validate_json(mutated_json)
-            new_msg = llm.generate_coaching_message(session.get(ClientProfile, pending.client_id), new_workout)
+            _feedback_client = session.get(ClientProfile, pending.client_id)
+            if _feedback_client is None:
+                logging.warning("client_not_found: %s", pending.client_id)
+                await update.message.reply_text("❌ Client profile not found.")
+                return ConversationHandler.END
+            new_msg = llm.generate_coaching_message(_feedback_client, new_workout)
 
             pending.workout_json = new_workout.model_dump_json()
             pending.coaching_message = new_msg
@@ -2282,7 +2297,7 @@ async def handle_plan_full_week(update: Update, context: ContextTypes.DEFAULT_TY
 async def admin_review(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show index card of all pending approvals; admin taps [Open] to expand each one."""
     admin_id = os.getenv("ADMIN_TELEGRAM_ID")
-    if not admin_id or str(update.effective_user.id) != admin_id:
+    if not admin_id or str(update.effective_user.id) != str(admin_id):
         return
 
     with Session(engine) as session:
@@ -2391,7 +2406,7 @@ async def handle_open_pending_item(update: Update, context: ContextTypes.DEFAULT
 async def admin_review_batch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/review_batch — groups pending plans by avatar+days bucket for efficient batch review."""
     admin_id = os.getenv("ADMIN_TELEGRAM_ID")
-    if not admin_id or str(update.effective_user.id) != admin_id:
+    if not admin_id or str(update.effective_user.id) != str(admin_id):
         return
 
     with Session(engine) as session:
@@ -2446,6 +2461,17 @@ _error_last_sent: dict[str, float] = {}
 _error_message_ids: dict[str, int] = {}
 _error_counts: dict[str, int] = {}
 _GENERATION_COOLDOWN_SECONDS = 60  # 1 minute between generations per client (prevents double-tap)
+_MAX_AGE_SECONDS = 86400  # 24h — entries older than this are pruned
+
+
+def _prune_old_entries(timestamps: dict, *companions: dict) -> None:
+    """Remove entries whose timestamp is older than _MAX_AGE_SECONDS from timestamps and all companion dicts."""
+    cutoff = time.monotonic() - _MAX_AGE_SECONDS
+    stale = [k for k, t in timestamps.items() if t < cutoff]
+    for k in stale:
+        timestamps.pop(k, None)
+        for d in companions:
+            d.pop(k, None)
 
 
 def _check_rate_limit(client_id: str) -> bool:
@@ -2455,6 +2481,7 @@ def _check_rate_limit(client_id: str) -> bool:
     if now - last < _GENERATION_COOLDOWN_SECONDS:
         return False
     _generation_timestamps[client_id] = now
+    _prune_old_entries(_generation_timestamps)
     return True
 
 
@@ -2487,6 +2514,7 @@ async def handle_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> No
 
     _error_last_sent[sig] = now
     _error_counts[sig] = 1
+    _prune_old_entries(_error_last_sent, _error_message_ids, _error_counts)
 
     if admin_id:
         try:
@@ -2681,7 +2709,7 @@ async def handle_plan_ack(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def handle_override(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/override [client_id] [from_id] [to_id] — set, list, or remove exercise overrides."""
     admin_id = os.getenv("ADMIN_TELEGRAM_ID")
-    if not admin_id or str(update.effective_user.id) != admin_id:
+    if not admin_id or str(update.effective_user.id) != str(admin_id):
         return
 
     args = context.args or []
@@ -2810,7 +2838,7 @@ _ADMIN_HELP = (
 
 async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     admin_id = os.getenv("ADMIN_TELEGRAM_ID")
-    is_admin = admin_id and str(update.effective_user.id) == admin_id
+    is_admin = admin_id and str(update.effective_user.id) == str(admin_id)
     text = f"*Client commands:*\n{_CLIENT_HELP}"
     if is_admin:
         text += f"\n\n*Admin commands:*\n{_ADMIN_HELP}"
@@ -2824,6 +2852,10 @@ def main():
     if not token:
         logging.error("No TELEGRAM_BOT_TOKEN found.")
         return
+
+    admin_id = os.getenv("ADMIN_TELEGRAM_ID")
+    if not admin_id:
+        logging.error("ADMIN_TELEGRAM_ID not set — admin commands will not work")
 
     create_db_and_tables()
     app = ApplicationBuilder().token(token).build()

@@ -46,6 +46,9 @@ def build_warmup(
     last_top_set_kg:  Previous session's top-set load — triggers 90% primer if
                       working_load_kg > 1.25 × last_top_set_kg.
     """
+    if working_load_kg <= bar_kg:
+        return []
+
     if not is_compound:
         # Single feeder set at ~50%
         return [WarmupSet(pct_of_working=0.50, reps=10, rest_seconds=60)]

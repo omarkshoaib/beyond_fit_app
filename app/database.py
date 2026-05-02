@@ -6,7 +6,7 @@ load_dotenv()
 
 # Automatically map to PostgreSQL if passed via .env, 
 # otherwise default natively to SQLite in the root folder structure.
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./coaching_engine.db")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./beyond_fit.db")
 
 # For SQLite, we must set check_same_thread=False
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}

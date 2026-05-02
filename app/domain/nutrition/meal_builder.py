@@ -109,9 +109,9 @@ def filter_food_pool(
     if medical_conditions:
         for condition in medical_conditions:
             if condition == "hypertension":
-                result = [f for f in result if "low_sodium" in f.medical_tags or "low_sodium" not in getattr(f, "_required_tags", [])]
+                result = [f for f in result if "low_sodium" in f.medical_tags]
             if condition == "type2_diabetes":
-                result = [f for f in result if "low_sugar" in f.medical_tags or f.carb_per_100g < 25]
+                result = [f for f in result if "low_sugar" in f.medical_tags and f.carb_per_100g < 25]
 
     # Soft filters (degrade gracefully)
     soft_result = [

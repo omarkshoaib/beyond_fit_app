@@ -11,19 +11,22 @@ authors = [
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "fastapi",
+    "fastapi>=0.115,<1",
     "uvicorn",
-    "pydantic",
-    "pydantic-settings",
-    "openai",
+    "pydantic>=2.7,<3",
+    "pydantic-settings>=2.3,<3",
+    "openai>=1.30,<2",
     "python-dotenv",
-    "python-telegram-bot",
+    "python-telegram-bot>=22.7,<23",
     "markdown2",
-    "weasyprint",
-    "sqlmodel",
+    "weasyprint>=62.0,<63",
+    "sqlmodel>=0.0.21,<1",
     "psycopg2-binary",
     "jinja2",
-    "tomli; python_version < '3.11'"
+    "tomli; python_version < '3.11'",
+    "alembic>=1.13,<2",
+    "python-jose[cryptography]>=3.3,<4",
+    "passlib[bcrypt]>=1.7,<2"
 ]
 
 [project.optional-dependencies]

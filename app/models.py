@@ -21,9 +21,10 @@ class Exercise(BaseModel):
 
 class ClientProfile(SQLModel, table=True):
     client_id: str = Field(primary_key=True)
-    avatar: str
-    training_days: int = Field(ge=3, le=6)
-    experience_level: str
+    avatar: str = Field(default="gen_pop")
+    training_days: int = Field(default=3, ge=3, le=6)
+    experience_level: str = Field(default="beginner")
+    password_hash: Optional[str] = Field(default=None)
     limitations: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     available_equipment: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     week_number: int = 1

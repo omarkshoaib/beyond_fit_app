@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     smtp_user: str = ""
     smtp_password: str = ""
 
+    # ── Auth ────────────────────────────────────────────────────────
+    auth_secret_key: str = "change-me-in-production"
+
     # ── Feature flags ───────────────────────────────────────────────
     feature_nutrition_enabled: bool = False
 

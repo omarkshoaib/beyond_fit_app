@@ -164,7 +164,7 @@ def apply_delta(plan: WorkoutWeek, delta: PlanDelta) -> WorkoutWeek:
             adj = adj_map.get(slot.exercise_id)
             if adj is None:
                 continue
-            slot.rpe = max(6, min(10, slot.rpe + int(adj.rpe_delta)))
+            slot.rpe = max(6, min(10, slot.rpe + round(adj.rpe_delta)))
             slot.sets = max(1, slot.sets + adj.sets_delta)
             if adj.load_multiplier is not None and slot.target_weight is not None:
                 from app.generator import AutoRegulator  # avoid circular at module level

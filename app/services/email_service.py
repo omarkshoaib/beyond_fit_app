@@ -34,12 +34,12 @@ class EmailService:
         
         # Send
         try:
-            with smtplib.SMTP(smtp_host, smtp_port) as server:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
                 server.starttls()
                 server.login(smtp_email, smtp_pwd)
                 server.send_message(msg)
             logging.info(f"Email successfully dispatched to {recipient_email}")
             return True
-        except Exception as e:
-            logging.error(f"Failed to send email to {recipient_email}: {e}")
+        except (smtplib.SMTPException, OSError, ValueError) as e:
+            logging.error(f"Failed to send email to {recipient_email}: {e}", exc_info=True)
             return False

@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import json
+import logging
 import os
+import time
 from typing import Optional
 
 from app.models import ClientProfile, WorkoutWeek
 from app.adapters.llm.openrouter import LLMClient, OpenRouterClient
+
+logger = logging.getLogger(__name__)
 
 
 class FlashCommunicationService:
@@ -49,7 +54,16 @@ class FlashCommunicationService:
             "Please draft the coaching email for this client."
         )
 
-        return self._llm.complete(system=system_instruction, user=prompt, temperature=0.4)
+        for attempt in range(3):
+            try:
+                response = self._llm.complete(system=system_instruction, user=prompt, temperature=0.4)
+                break
+            except Exception as e:
+                if attempt == 2:
+                    raise
+                logger.warning("LLM call failed (attempt %d/3): %s", attempt + 1, e)
+                time.sleep(2 ** attempt)
+        return response
 
     def generate_exercise_tips(self, exercise_name: str, experience_level: str, avatar: str) -> str:
         """Generate a concise form/technique breakdown for an exercise."""
@@ -85,7 +99,15 @@ class FlashCommunicationService:
             f"COACH FEEDBACK:\n{coach_feedback}"
         )
 
-        content = self._llm.complete(system=system_instruction, user=prompt, temperature=0.1)
+        for attempt in range(3):
+            try:
+                content = self._llm.complete(system=system_instruction, user=prompt, temperature=0.1)
+                break
+            except Exception as e:
+                if attempt == 2:
+                    raise
+                logger.warning("LLM call failed (attempt %d/3): %s", attempt + 1, e)
+                time.sleep(2 ** attempt)
 
         # Guard against markdown wrapping from models that ignore instructions
         content = content.strip()
@@ -96,4 +118,11 @@ class FlashCommunicationService:
         if content.endswith("```"):
             content = content[:-3]
 
-        return content.strip()
+        content = content.strip()
+
+        try:
+            json.loads(content)  # validate JSON before returning
+        except json.JSONDecodeError as e:
+            raise ValueError(f"LLM returned invalid JSON: {e}\nContent: {content[:200]}")
+
+        return content
