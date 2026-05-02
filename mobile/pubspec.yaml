@@ -1,0 +1,43 @@
+name: beyond_fit
+description: "Beyond Fit — deterministic coaching engine mobile client"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # Navigation
+  go_router: ^14.6.3
+
+  # State management
+  flutter_riverpod: ^2.6.1
+  riverpod_annotation: ^2.6.1
+
+  # HTTP
+  dio: ^5.8.0
+
+  # Local storage (tokens)
+  flutter_secure_storage: ^9.2.4
+
+  # Charts
+  fl_chart: ^0.71.0
+
+  # UI utilities
+  intl: ^0.20.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  build_runner: ^2.4.15
+  riverpod_generator: ^2.6.1
+
+flutter:
+  uses-material-design: true
