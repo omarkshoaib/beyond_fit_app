@@ -1,0 +1,22 @@
+{% if slot is defined %}
+<div class="meal-card no-break">
+  <div class="meal-card__header">
+    <span class="meal-card__title">{{ slot.slot_name | replace('_', ' ') | title }}</span>
+    <span class="meal-card__kcal">{{ slot.kcal | round | int }} kcal</span>
+  </div>
+  <div class="meal-card__body">
+    <div class="meal-card__macro-row">
+      <span>P <strong>{{ slot.protein_g | round | int }}g</strong></span>
+      <span>F <strong>{{ slot.fat_g | round | int }}g</strong></span>
+      <span>C <strong>{{ slot.carb_g | round | int }}g</strong></span>
+      <span>Fiber <strong>{{ slot.fiber_g | round | int }}g</strong></span>
+    </div>
+    {% for food, grams in slot.items %}
+    <div class="food-item-row">
+      <span class="food-item-row__name">{{ food.name }}</span>
+      <span class="food-item-row__amount">{{ grams | round | int }} g</span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}

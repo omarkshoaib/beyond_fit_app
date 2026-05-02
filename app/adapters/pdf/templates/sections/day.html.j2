@@ -1,0 +1,18 @@
+<div class="page-break-before">
+  <div class="day-header">
+    <h3>{{ day.day_name }}</h3>
+    <span class="day-meta">{{ day.slots | length }} exercises · {{ day.total_fatigue }} fatigue</span>
+  </div>
+
+  {% set slot_labels = ['A', 'B', 'C', 'D', 'E', 'F'] %}
+  {% set slot_type_map = {'main_lift': 'accent', 'primary_accessory': 'accessory', 'isolation': ''} %}
+
+  {% for slot in day.slots %}
+  {% set label = slot_labels[loop.index0] ~ '1' %}
+  {% set card_mod = '' %}
+  {% if slot.slot_type == 'primary_accessory' %}{% set card_mod = 'exercise-card--accessory' %}{% endif %}
+  {% if is_deload %}{% set card_mod = card_mod ~ ' exercise-card--deload' %}{% endif %}
+
+  {% include "partials/_exercise_card.html.j2" %}
+  {% endfor %}
+</div>

@@ -1,0 +1,150 @@
+/* nutrition.css — nutrition plan specific layout */
+
+body.nutrition-mode {
+    background: var(--paper-n);
+}
+
+/* ── Meal card ───────────────────────────────────────────────────────────── */
+.meal-card {
+    border: 1pt solid var(--border);
+    border-left: 3pt solid var(--primary);
+    border-radius: 0 6pt 6pt 0;
+    margin-bottom: var(--space-sm);
+    background: #fff;
+    break-inside: avoid;
+}
+
+.meal-card__header {
+    background: var(--primary);
+    color: #fff;
+    padding: 5pt var(--space-sm);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.meal-card__title {
+    font-family: var(--font-heading);
+    font-size: 10pt;
+    font-weight: 700;
+    text-transform: capitalize;
+}
+
+.meal-card__kcal {
+    font-family: var(--font-mono);
+    font-size: 9pt;
+    opacity: 0.85;
+}
+
+.meal-card__body {
+    padding: var(--space-sm);
+}
+
+.meal-card__macro-row {
+    display: flex;
+    gap: var(--space-sm);
+    font-family: var(--font-mono);
+    font-size: 8.5pt;
+    color: var(--muted);
+    margin-bottom: var(--space-sm);
+}
+
+.meal-card__macro-row span { white-space: nowrap; }
+
+/* Food item rows */
+.food-item-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 3pt 0;
+    border-bottom: 0.5pt solid var(--border);
+    font-size: 9pt;
+}
+
+.food-item-row:last-child { border-bottom: none; }
+
+.food-item-row__name { flex: 1; }
+
+.food-item-row__amount {
+    font-family: var(--font-mono);
+    font-size: 8.5pt;
+    color: var(--muted);
+    min-width: 36pt;
+    text-align: right;
+}
+
+/* ── Day nutrition summary ───────────────────────────────────────────────── */
+.nutrition-day-header {
+    background: var(--primary);
+    color: #fff;
+    padding: var(--space-sm) var(--space-md);
+    margin-bottom: var(--space-md);
+    border-radius: 4pt;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    break-after: avoid;
+}
+
+.nutrition-day-header h3 { color: #fff; margin: 0; font-size: 13pt; }
+.nutrition-day-header .day-meta {
+    font-size: 8pt;
+    color: rgba(255,255,255,0.7);
+    font-family: var(--font-mono);
+}
+
+/* ── Shopping list ───────────────────────────────────────────────────────── */
+.shopping-category {
+    margin-bottom: var(--space-md);
+    break-inside: avoid;
+}
+
+.shopping-category__title {
+    font-family: var(--font-heading);
+    font-size: 10pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--primary);
+    border-bottom: 1pt solid var(--border);
+    padding-bottom: 3pt;
+    margin-bottom: var(--space-sm);
+}
+
+.shopping-item {
+    font-size: 9pt;
+    padding: 2pt 0;
+    display: flex;
+    align-items: baseline;
+    gap: 6pt;
+}
+
+.shopping-item::before {
+    content: "☐";
+    font-size: 10pt;
+    color: var(--muted);
+    flex-shrink: 0;
+}
+
+.shopping-item__name { flex: 1; }
+.shopping-item__qty {
+    font-family: var(--font-mono);
+    font-size: 8.5pt;
+    color: var(--muted);
+}
+
+/* ── Macro overview chart placeholder ───────────────────────────────────── */
+.macro-chart {
+    text-align: center;
+    margin: var(--space-md) 0;
+}
+
+.macro-chart img {
+    max-width: 100%;
+    height: auto;
+}
+
+/* ── Nutrition section headers use --primary accent ─────────────────────── */
+.section-header--nutrition .section-header__bar {
+    border-left-color: var(--primary);
+}

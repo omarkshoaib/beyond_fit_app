@@ -1,0 +1,86 @@
+/* base.css — reset, CSS variables, typography */
+
+:root {
+    /* Palette A "Studio" — workout */
+    --ink: #0F1720;
+    --paper: #FAFAF7;
+    --accent: #FF5A1F;
+    --accent-alt: #1E6F5C;    /* deload */
+    --muted: #6B7280;
+    --border: #E5E7EB;
+    --surface: #F3F4F6;
+
+    /* Palette C "Wellness" — nutrition */
+    --primary: #2F5D50;
+    --accent-n: #E07856;
+    --paper-n: #F7F3EC;
+
+    /* Typography */
+    --font-heading: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+    --font-body: 'Inter', 'Helvetica Neue', Arial, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+
+    /* Spacing */
+    --space-xs: 4pt;
+    --space-sm: 8pt;
+    --space-md: 16pt;
+    --space-lg: 24pt;
+    --space-xl: 32pt;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: var(--font-body);
+    font-size: 10pt;
+    line-height: 1.5;
+    color: var(--ink);
+    background: var(--paper);
+    hyphens: auto;
+}
+
+h1, h2, h3, h4, h5 {
+    font-family: var(--font-heading);
+    font-weight: 700;
+    line-height: 1.2;
+    color: var(--ink);
+}
+
+h1 { font-size: 28pt; font-weight: 900; }
+h2 { font-size: 18pt; }
+h3 { font-size: 14pt; }
+h4 { font-size: 12pt; }
+h5 { font-size: 10pt; text-transform: uppercase; letter-spacing: 0.08em; }
+
+p { margin-bottom: var(--space-sm); }
+
+code, .mono {
+    font-family: var(--font-mono);
+    font-size: 9pt;
+}
+
+.accent   { color: var(--accent); }
+.muted    { color: var(--muted); }
+.primary  { color: var(--primary); }
+
+.text-right  { text-align: right; }
+.text-center { text-align: center; }
+
+.badge {
+    display: inline-block;
+    padding: 2pt 6pt;
+    border-radius: 3pt;
+    font-size: 8pt;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.badge-accent   { background: var(--accent); color: #fff; }
+.badge-primary  { background: var(--primary); color: #fff; }
+.badge-muted    { background: var(--surface); color: var(--muted); }
+.badge-deload   { background: var(--accent-alt); color: #fff; }

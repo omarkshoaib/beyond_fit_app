@@ -1,0 +1,79 @@
+<div class="exercise-card {{ card_mod }} no-break">
+  {# Left ordering label #}
+  <div class="exercise-card__label">{{ label }}</div>
+
+  {# Middle content #}
+  <div class="exercise-card__body">
+    <div class="exercise-card__name">{{ slot.exercise_name }}</div>
+    <div class="exercise-card__muscle">{{ slot.slot_type | replace('_', ' ') | title }}</div>
+
+    {# Prescription tiles #}
+    <div class="prescription-tiles">
+      <div class="ptile">
+        <span class="ptile__value">{{ slot.sets }}</span>
+        <span class="ptile__label">Sets</span>
+      </div>
+      <div class="ptile">
+        <span class="ptile__value">{{ slot.reps }}</span>
+        <span class="ptile__label">Reps</span>
+      </div>
+      <div class="ptile ptile--rpe">
+        <span class="ptile__value">{{ slot.rpe }}</span>
+        <span class="ptile__label">RPE</span>
+      </div>
+      {% if slot.tempo %}
+      <div class="ptile">
+        <span class="ptile__value" style="font-size: 8pt;">{{ slot.tempo }}</span>
+        <span class="ptile__label">Tempo</span>
+      </div>
+      {% endif %}
+      {% if slot.rest_seconds %}
+      <div class="ptile">
+        <span class="ptile__value">{{ (slot.rest_seconds / 60) | round(1) }}m</span>
+        <span class="ptile__label">Rest</span>
+      </div>
+      {% endif %}
+      {% if slot.target_weight %}
+      <div class="ptile">
+        <span class="ptile__value">{{ slot.target_weight | round(1) }}</span>
+        <span class="ptile__label">kg</span>
+      </div>
+      {% endif %}
+    </div>
+
+    {# Coaching cues #}
+    {% if slot.coaching_cues %}
+    <div class="exercise-card__cue">
+      {{ slot.coaching_cues[0] }}
+    </div>
+    {% endif %}
+
+    {# Warmup sets #}
+    {% if slot.warmup_sets %}
+    <div class="warmup-sets">
+      <div class="warmup-sets__title">Warm-up</div>
+      {% for ws in slot.warmup_sets %}
+      <div class="warmup-set-row">
+        {{ (ws.pct_of_working * 100) | round | int }}% × {{ ws.reps }}
+        · {{ ws.rest_seconds }}s rest
+        {% if ws.is_primer %}<span class="primer-tag">PRIMER</span>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+
+  {# Right QR placeholder — renderer embeds base64 PNG #}
+  <div class="exercise-card__qr">
+    {% if slot.qr_data_uri %}
+    <img src="{{ slot.qr_data_uri }}" alt="QR {{ slot.exercise_name }}">
+    {% else %}
+    <div style="width: 52pt; height: 52pt; background: var(--surface);
+                border-radius: 4pt; display: flex; align-items: center;
+                justify-content: center; font-size: 7pt; color: var(--muted);
+                text-align: center; padding: 4pt;">
+      Video<br>Demo
+    </div>
+    {% endif %}
+  </div>
+</div>

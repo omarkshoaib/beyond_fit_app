@@ -1,0 +1,65 @@
+<div class="cover-page">
+  <div style="margin-bottom: 48pt;">
+    <div style="font-family: var(--font-heading); font-size: 10pt; font-weight: 600;
+                text-transform: uppercase; letter-spacing: 0.15em;
+                color: rgba(255,255,255,0.5); margin-bottom: 8pt;">
+      Beyond Fit · Personalised Coaching
+    </div>
+    <h1 style="font-size: 38pt; font-weight: 900; color: #fff; line-height: 1.05;
+               margin-bottom: 8pt;">
+      {{ plan_title }}
+    </h1>
+    <div style="width: 48pt; height: 4pt; background: var(--accent); margin-bottom: 16pt;"></div>
+    <p style="font-size: 13pt; color: rgba(255,255,255,0.75); margin: 0;">
+      Prepared for <strong style="color: #fff;">{{ client.client_id }}</strong>
+    </p>
+  </div>
+
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16pt; margin-bottom: 48pt;">
+    {% if workout_plan %}
+    <div>
+      <div style="font-size: 8pt; text-transform: uppercase; letter-spacing: 0.1em;
+                  color: rgba(255,255,255,0.4); margin-bottom: 4pt;">Workout Block</div>
+      <div style="font-family: var(--font-mono); font-size: 14pt; color: #fff;">
+        Block {{ block_number }}{% if version > 1 %} · v{{ version }}{% endif %}
+      </div>
+    </div>
+    {% endif %}
+    {% if nutrition_plan %}
+    <div>
+      <div style="font-size: 8pt; text-transform: uppercase; letter-spacing: 0.1em;
+                  color: rgba(255,255,255,0.4); margin-bottom: 4pt;">Nutrition Target</div>
+      <div style="font-family: var(--font-mono); font-size: 14pt; color: #fff;">
+        {{ nutrition_plan.kcal_target | round | int }} kcal / day
+      </div>
+    </div>
+    {% endif %}
+    <div>
+      <div style="font-size: 8pt; text-transform: uppercase; letter-spacing: 0.1em;
+                  color: rgba(255,255,255,0.4); margin-bottom: 4pt;">Generated</div>
+      <div style="font-family: var(--font-mono); font-size: 14pt; color: #fff;">
+        {{ generated_date }}
+      </div>
+    </div>
+    {% if client.avatar %}
+    <div>
+      <div style="font-size: 8pt; text-transform: uppercase; letter-spacing: 0.1em;
+                  color: rgba(255,255,255,0.4); margin-bottom: 4pt;">Profile</div>
+      <div style="font-family: var(--font-mono); font-size: 14pt; color: #fff;">
+        {{ client.avatar | title }} · {{ client.experience_level | title }}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <div style="position: absolute; bottom: 24pt; left: 20mm; right: 20mm;
+              border-top: 0.5pt solid rgba(255,255,255,0.15); padding-top: 12pt;
+              display: flex; justify-content: space-between;">
+    <span style="font-size: 8pt; color: rgba(255,255,255,0.4);">
+      This plan is personalised and confidential. Do not share.
+    </span>
+    {% if draft_watermark %}
+    <span class="badge badge-accent" style="font-size: 8pt;">DRAFT — COACH REVIEW PENDING</span>
+    {% endif %}
+  </div>
+</div>

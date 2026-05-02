@@ -1,0 +1,131 @@
+/* components.css — shared reusable components */
+
+/* ── Macro tiles ─────────────────────────────────────────────────────────── */
+.macro-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: var(--space-sm);
+    margin-bottom: var(--space-md);
+}
+
+.macro-tile {
+    background: var(--surface);
+    border-radius: 6pt;
+    padding: var(--space-sm) var(--space-sm);
+    text-align: center;
+    break-inside: avoid;
+}
+
+.macro-tile__value {
+    font-family: var(--font-mono);
+    font-size: 18pt;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--ink);
+}
+
+.macro-tile__unit {
+    font-size: 8pt;
+    color: var(--muted);
+    margin-top: 2pt;
+}
+
+.macro-tile__label {
+    font-size: 8pt;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-top: 4pt;
+}
+
+.macro-tile--kcal .macro-tile__value { color: var(--accent); }
+.macro-tile--protein .macro-tile__value { color: var(--primary); }
+
+/* ── Section header ──────────────────────────────────────────────────────── */
+.section-header {
+    border-left: 4pt solid var(--accent);
+    padding-left: var(--space-sm);
+    margin-bottom: var(--space-md);
+    margin-top: var(--space-lg);
+    break-after: avoid;
+}
+
+.section-header--nutrition {
+    border-color: var(--primary);
+}
+
+.section-header h2 { margin: 0; }
+.section-header p  { margin: 2pt 0 0; font-size: 9pt; color: var(--muted); }
+
+/* ── Info table ──────────────────────────────────────────────────────────── */
+.info-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9pt;
+    margin-bottom: var(--space-md);
+}
+
+.info-table th {
+    text-align: left;
+    font-weight: 600;
+    font-size: 8pt;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    padding: 4pt 8pt;
+    border-bottom: 1pt solid var(--border);
+}
+
+.info-table td {
+    padding: 5pt 8pt;
+    border-bottom: 1pt solid var(--border);
+    vertical-align: top;
+}
+
+.info-table tr:last-child td { border-bottom: none; }
+.info-table tr:nth-child(even) td { background: var(--surface); }
+
+/* ── Callout box ─────────────────────────────────────────────────────────── */
+.callout {
+    border-left: 3pt solid var(--accent);
+    background: #FFF5F0;
+    padding: var(--space-sm) var(--space-md);
+    border-radius: 0 4pt 4pt 0;
+    margin-bottom: var(--space-md);
+    break-inside: avoid;
+}
+
+.callout--info   { border-color: #3B82F6; background: #EFF6FF; }
+.callout--warn   { border-color: #F59E0B; background: #FFFBEB; }
+.callout--deload { border-color: var(--accent-alt); background: #F0FDF4; }
+
+.callout p { margin: 0; font-size: 9pt; }
+
+/* ── Draft watermark ─────────────────────────────────────────────────────── */
+.watermark {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) rotate(-45deg);
+    font-family: var(--font-heading);
+    font-size: 80pt;
+    font-weight: 900;
+    color: rgba(255, 90, 31, 0.08);
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: -1;
+}
+
+/* ── Two-column layout ───────────────────────────────────────────────────── */
+.two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-md);
+}
+
+.three-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: var(--space-md);
+}

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{{ client.client_id }} — {{ plan_title }}</title>
+<style>
+  /* CSS is injected inline by the renderer for file:// path correctness */
+  {{ css_content }}
+</style>
+</head>
+<body{% if nutrition_only %} class="nutrition-mode"{% endif %}>
+
+{# Running header elements — MUST appear before page content #}
+<div id="running-header-left">{{ client.client_id }} | Beyond Fit</div>
+<div id="running-header-right">Block {{ block_number }}{% if version > 1 %} v{{ version }}{% endif %}</div>
+<div id="running-footer-left">Generated {{ generated_date }} · Confidential</div>
+
+{% if draft_watermark %}
+<div class="watermark">DRAFT</div>
+{% endif %}
+
+{% block content %}{% endblock %}
+
+</body>
+</html>

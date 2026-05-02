@@ -1,0 +1,78 @@
+<div class="section-header section-header--nutrition">
+  <h2>Nutrition Plan</h2>
+  <p>{{ nutrition_plan.rationale if nutrition_plan and nutrition_plan.rationale else "Deterministic macro targets" }}</p>
+</div>
+
+{# Macro tiles #}
+<div class="macro-grid">
+  <div class="macro-tile macro-tile--kcal">
+    <div class="macro-tile__value">{{ nutrition_plan.kcal_target | round | int }}</div>
+    <div class="macro-tile__unit">kcal</div>
+    <div class="macro-tile__label">Daily Target</div>
+  </div>
+  <div class="macro-tile macro-tile--protein">
+    <div class="macro-tile__value">{{ nutrition_plan.protein_g | round | int }}</div>
+    <div class="macro-tile__unit">g</div>
+    <div class="macro-tile__label">Protein</div>
+  </div>
+  <div class="macro-tile">
+    <div class="macro-tile__value">{{ nutrition_plan.fat_g | round | int }}</div>
+    <div class="macro-tile__unit">g</div>
+    <div class="macro-tile__label">Fat</div>
+  </div>
+  <div class="macro-tile">
+    <div class="macro-tile__value">{{ nutrition_plan.carb_g | round | int }}</div>
+    <div class="macro-tile__unit">g</div>
+    <div class="macro-tile__label">Carbs</div>
+  </div>
+  <div class="macro-tile">
+    <div class="macro-tile__value">{{ nutrition_plan.fiber_g | round | int }}</div>
+    <div class="macro-tile__unit">g</div>
+    <div class="macro-tile__label">Fiber</div>
+  </div>
+</div>
+
+<div class="two-col" style="margin-bottom: var(--space-lg);">
+  <div>
+    <h4 style="margin-bottom: var(--space-sm);">Daily Targets</h4>
+    <table class="info-table">
+      <tbody>
+        <tr>
+          <td style="color: var(--muted); font-size: 8.5pt;">Calories</td>
+          <td class="mono">{{ nutrition_plan.kcal_target | round | int }} kcal</td>
+        </tr>
+        <tr>
+          <td style="color: var(--muted); font-size: 8.5pt;">Protein</td>
+          <td class="mono">{{ (nutrition_plan.protein_g or 0) | round | int }} g
+            {% set kcal = nutrition_plan.kcal_target or 1 %}
+            ({{ (((nutrition_plan.protein_g or 0) * 4 / kcal) * 100) | round | int }}%)</td>
+        </tr>
+        <tr>
+          <td style="color: var(--muted); font-size: 8.5pt;">Fat</td>
+          <td class="mono">{{ (nutrition_plan.fat_g or 0) | round | int }} g
+            ({{ (((nutrition_plan.fat_g or 0) * 9 / kcal) * 100) | round | int }}%)</td>
+        </tr>
+        <tr>
+          <td style="color: var(--muted); font-size: 8.5pt;">Carbohydrates</td>
+          <td class="mono">{{ (nutrition_plan.carb_g or 0) | round | int }} g
+            ({{ (((nutrition_plan.carb_g or 0) * 4 / kcal) * 100) | round | int }}%)</td>
+        </tr>
+        <tr>
+          <td style="color: var(--muted); font-size: 8.5pt;">Fiber</td>
+          <td class="mono">{{ (nutrition_plan.fiber_g or 0) | round | int }} g</td>
+        </tr>
+        <tr>
+          <td style="color: var(--muted); font-size: 8.5pt;">Water</td>
+          <td class="mono">{{ ((nutrition_plan.water_ml or 0) / 1000) | round(1) }} L</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div>
+    {% if macro_chart_svg %}
+    <div class="macro-chart">
+      {{ macro_chart_svg | safe }}
+    </div>
+    {% endif %}
+  </div>
+</div>

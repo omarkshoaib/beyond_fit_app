@@ -1,0 +1,22 @@
+<div class="section-header section-header--nutrition" style="margin-top: var(--space-xl);">
+  <h2>7-Day Meal Plan</h2>
+  <p>Portions are in grams per serving. Swap items within the same category to stay on target.</p>
+</div>
+
+{% for day_data in nutrition_days %}
+<div class="{% if not loop.first %}page-break-before{% endif %}">
+  <div class="nutrition-day-header">
+    <h3>Day {{ loop.index }}</h3>
+    <span class="day-meta">
+      {{ day_data.kcal | round | int }} kcal ·
+      P {{ day_data.protein_g | round | int }}g ·
+      F {{ day_data.fat_g | round | int }}g ·
+      C {{ day_data.carb_g | round | int }}g
+    </span>
+  </div>
+
+  {% for slot in day_data.slots %}
+  {% include "partials/_meal_card.html.j2" %}
+  {% endfor %}
+</div>
+{% endfor %}

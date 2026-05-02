@@ -1,0 +1,64 @@
+<div class="page-break-before">
+  <div class="section-header">
+    <h2>Block {{ block_number }} Overview</h2>
+    <p>{{ workout_plan.rationale if workout_plan and workout_plan.rationale else "Evidence-based periodisation" }}</p>
+  </div>
+
+  {% if volume_chart_svg %}
+  <div class="macro-chart" style="margin-bottom: var(--space-lg);">
+    {{ volume_chart_svg | safe }}
+  </div>
+  {% endif %}
+
+  <div class="two-col">
+    <div>
+      <h4 style="margin-bottom: var(--space-sm);">Training Parameters</h4>
+      <table class="info-table">
+        <tbody>
+          <tr>
+            <td style="color: var(--muted); font-size: 8.5pt;">Training days / week</td>
+            <td class="mono">{{ client.training_days }}</td>
+          </tr>
+          <tr>
+            <td style="color: var(--muted); font-size: 8.5pt;">Experience level</td>
+            <td>{{ client.experience_level | title }}</td>
+          </tr>
+          <tr>
+            <td style="color: var(--muted); font-size: 8.5pt;">Block length</td>
+            <td class="mono">5 weeks</td>
+          </tr>
+          <tr>
+            <td style="color: var(--muted); font-size: 8.5pt;">Deload week</td>
+            <td class="mono">Week 5</td>
+          </tr>
+          <tr>
+            <td style="color: var(--muted); font-size: 8.5pt;">Profile</td>
+            <td>{{ client.avatar | title }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <h4 style="margin-bottom: var(--space-sm);">RPE Progression</h4>
+      <table class="info-table">
+        <thead><tr><th>Week</th><th>Target RPE</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">1</td><td class="mono">7.0</td><td>Introductory</td></tr>
+          <tr><td class="mono">2</td><td class="mono">7.5</td><td>Building</td></tr>
+          <tr><td class="mono">3</td><td class="mono">8.0</td><td>Accumulation</td></tr>
+          <tr><td class="mono">4</td><td class="mono">9.0</td><td>Intensification</td></tr>
+          <tr><td class="mono">5</td>
+              <td class="mono" style="color: var(--accent-alt);">6.0</td>
+              <td><span class="badge badge-deload">Deload</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {% if client.limitations %}
+  <div class="callout callout--warn" style="margin-top: var(--space-md);">
+    <p><strong>Accommodations applied:</strong>
+    {{ client.limitations | join(", ") | replace("_", " ") | title }}</p>
+  </div>
+  {% endif %}
+</div>

@@ -1,0 +1,89 @@
+/* page.css — @page rules, running header/footer, margins */
+
+@page {
+    size: A4 portrait;
+    margin: 20mm 16mm 24mm 16mm;
+
+    @top-left {
+        content: element(running-header-left);
+        font-family: 'Inter', sans-serif;
+        font-size: 8pt;
+        color: #6B7280;
+    }
+
+    @top-right {
+        content: element(running-header-right);
+        font-family: 'Inter', sans-serif;
+        font-size: 8pt;
+        color: #6B7280;
+    }
+
+    @bottom-center {
+        content: counter(page) " / " counter(pages);
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 8pt;
+        color: #6B7280;
+    }
+
+    @bottom-left {
+        content: element(running-footer-left);
+        font-family: 'Inter', sans-serif;
+        font-size: 7.5pt;
+        color: #9CA3AF;
+    }
+}
+
+@page cover {
+    margin: 0;
+    @top-left { content: none; }
+    @top-right { content: none; }
+    @bottom-center { content: none; }
+    @bottom-left { content: none; }
+}
+
+@page toc {
+    @top-left { content: "Contents"; }
+}
+
+/* Running header elements — MUST appear before content in HTML source */
+#running-header-left {
+    position: running(running-header-left);
+    font-size: 8pt;
+    color: #6B7280;
+}
+
+#running-header-right {
+    position: running(running-header-right);
+    font-size: 8pt;
+    color: #6B7280;
+    text-align: right;
+}
+
+#running-footer-left {
+    position: running(running-footer-left);
+    font-size: 7.5pt;
+    color: #9CA3AF;
+}
+
+/* Page breaks */
+.page-break-before { break-before: page; }
+.page-break-after  { break-after: page; }
+.no-break          { break-inside: avoid; }
+
+/* Cover page */
+.cover-page {
+    page: cover;
+    break-after: page;
+    width: 210mm;
+    height: 297mm;
+    background: var(--ink);
+    color: var(--paper);
+    padding: 32mm 20mm;
+    display: block;
+    position: relative;
+}
+
+/* TOC page */
+.toc-page {
+    page: toc;
+}

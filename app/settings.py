@@ -1,0 +1,62 @@
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from functools import lru_cache
+from typing import Optional
+
+try:
+    import tomllib  # Python 3.11+
+except ImportError:
+    import tomli as tomllib  # type: ignore[no-redef]
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+_CONFIG_DIR = Path(__file__).parent / "config"
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    # ── Database ────────────────────────────────────────────────────
+    database_url: str = "sqlite:///./beyond_fit.db"
+
+    # ── LLM / OpenRouter ───────────────────────────────────────────
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    llm_model_id: str = "google/gemini-3.1-flash-lite-preview"
+    llm_temperature: float = 0.4
+
+    # ── Telegram ────────────────────────────────────────────────────
+    telegram_bot_token: str = ""
+    admin_chat_id: Optional[int] = None
+
+    # ── Email ───────────────────────────────────────────────────────
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+
+    # ── Feature flags ───────────────────────────────────────────────
+    feature_nutrition_enabled: bool = False
+
+    # ── Cached TOML config ─────────────────────────────────────────
+    @property
+    def workout_constants(self) -> dict:
+        return _load_toml(_CONFIG_DIR / "workout_constants.toml")
+
+
+def _load_toml(path: Path) -> dict:
+    with open(path, "rb") as fh:
+        return tomllib.load(fh)
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    return Settings()

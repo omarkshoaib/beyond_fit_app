@@ -1,0 +1,44 @@
+<div class="page-break-before">
+  <div class="section-header">
+    <h2>Weekly Overview</h2>
+    <p>Session focus and volume targets at a glance</p>
+  </div>
+
+  <div class="week-grid">
+    {% for cell in week_cells %}
+    <div class="week-cell {% if cell.is_rest %}week-cell--rest{% endif %}">
+      <div class="week-cell__day">{{ cell.day_label }}</div>
+      <div class="week-cell__focus">{{ cell.focus }}</div>
+      {% if not cell.is_rest %}
+      <div class="week-cell__sets">{{ cell.total_sets }}s</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+
+  {% if workout_days %}
+  <h4 style="margin-bottom: var(--space-sm);">Session Summary</h4>
+  <table class="info-table">
+    <thead>
+      <tr>
+        <th>Day</th>
+        <th>Focus</th>
+        <th>Main Lift</th>
+        <th>Sets</th>
+        <th>Target RPE</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for day_summary in day_summaries %}
+      <tr>
+        <td>{{ day_summary.name }}</td>
+        <td>{{ day_summary.focus }}</td>
+        <td>{{ day_summary.main_lift }}</td>
+        <td class="mono">{{ day_summary.total_sets }}</td>
+        <td class="mono" style="color: var(--accent);">{{ day_summary.rpe }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>

@@ -1,0 +1,42 @@
+{% extends "base.html.j2" %}
+
+{% block content %}
+
+{# ── Cover ──────────────────────────────────────────────────────────────── #}
+{% include "sections/cover.html.j2" %}
+
+{# ── How-to-read legend ─────────────────────────────────────────────────── #}
+{% include "sections/how_to_read.html.j2" %}
+
+{# ── Workout section ─────────────────────────────────────────────────────── #}
+{% if workout_plan %}
+
+  {# Block overview #}
+  {% include "sections/block_overview.html.j2" %}
+
+  {# Week overview grid #}
+  {% include "sections/week.html.j2" %}
+
+  {# One day per page — exercise cards #}
+  {% for day in workout_days %}
+    {% include "sections/day.html.j2" %}
+  {% endfor %}
+
+{% endif %}
+
+{# ── Nutrition section ───────────────────────────────────────────────────── #}
+{% if nutrition_plan %}
+
+  <div class="page-break-before"></div>
+  {% include "sections/nutrition_overview.html.j2" %}
+
+  {% include "sections/meal_plan.html.j2" %}
+
+  {% include "sections/shopping_list.html.j2" %}
+
+{% endif %}
+
+{# ── Progress tracking + Glossary ────────────────────────────────────────── #}
+{% include "sections/glossary.html.j2" %}
+
+{% endblock %}

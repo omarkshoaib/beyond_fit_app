@@ -1,0 +1,201 @@
+/* workout.css — exercise card and workout-specific layout */
+
+/* ── Exercise card ───────────────────────────────────────────────────────── */
+.exercise-card {
+    display: grid;
+    grid-template-columns: 34pt 1fr 68pt;
+    gap: 0;
+    border: 1pt solid var(--border);
+    border-left: 3pt solid var(--accent);
+    border-radius: 0 6pt 6pt 0;
+    margin-bottom: var(--space-sm);
+    background: #fff;
+    break-inside: avoid;
+    min-height: 80pt;
+}
+
+.exercise-card--deload {
+    border-left-color: var(--accent-alt);
+}
+
+.exercise-card--accessory {
+    border-left-color: #94A3B8;
+}
+
+/* Left ordering label */
+.exercise-card__label {
+    background: var(--accent);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: 11pt;
+    font-weight: 700;
+    border-radius: 0;
+    writing-mode: horizontal-tb;
+}
+
+.exercise-card--deload .exercise-card__label    { background: var(--accent-alt); }
+.exercise-card--accessory .exercise-card__label { background: #94A3B8; }
+
+/* Middle content */
+.exercise-card__body {
+    padding: var(--space-sm);
+}
+
+.exercise-card__name {
+    font-family: var(--font-heading);
+    font-size: 11pt;
+    font-weight: 700;
+    margin-bottom: 4pt;
+}
+
+.exercise-card__muscle {
+    font-size: 8pt;
+    color: var(--muted);
+    margin-bottom: var(--space-sm);
+}
+
+/* Prescription tiles row */
+.prescription-tiles {
+    display: flex;
+    gap: 4pt;
+    margin-bottom: var(--space-sm);
+    flex-wrap: wrap;
+}
+
+.ptile {
+    background: var(--surface);
+    border-radius: 3pt;
+    padding: 2pt 5pt;
+    text-align: center;
+    min-width: 36pt;
+}
+
+.ptile__value {
+    font-family: var(--font-mono);
+    font-size: 10pt;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--ink);
+    display: block;
+}
+
+.ptile__label {
+    font-size: 7pt;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    display: block;
+}
+
+.ptile--rpe .ptile__value { color: var(--accent); }
+
+/* Coaching cue */
+.exercise-card__cue {
+    font-style: italic;
+    font-size: 8.5pt;
+    color: var(--muted);
+    border-top: 0.5pt solid var(--border);
+    padding-top: 4pt;
+    margin-top: 4pt;
+}
+
+/* Warmup sets mini-list */
+.warmup-sets {
+    margin-top: 4pt;
+    font-size: 8pt;
+}
+
+.warmup-sets__title {
+    font-weight: 600;
+    font-size: 7.5pt;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    margin-bottom: 2pt;
+}
+
+.warmup-set-row {
+    font-family: var(--font-mono);
+    font-size: 8pt;
+    color: var(--muted);
+    line-height: 1.6;
+}
+
+.warmup-set-row .primer-tag {
+    color: var(--accent);
+    font-size: 7pt;
+    margin-left: 3pt;
+}
+
+/* Right QR column */
+.exercise-card__qr {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-sm);
+    border-left: 0.5pt solid var(--border);
+}
+
+.exercise-card__qr img {
+    width: 52pt;
+    height: 52pt;
+}
+
+/* ── Day section ─────────────────────────────────────────────────────────── */
+.day-header {
+    background: var(--ink);
+    color: var(--paper);
+    padding: var(--space-sm) var(--space-md);
+    margin-bottom: var(--space-md);
+    border-radius: 4pt;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    break-after: avoid;
+}
+
+.day-header h3 { color: var(--paper); margin: 0; font-size: 13pt; }
+.day-header .day-meta { font-size: 8pt; color: rgba(255,255,255,0.6); font-family: var(--font-mono); }
+
+/* ── Week overview grid ──────────────────────────────────────────────────── */
+.week-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4pt;
+    margin-bottom: var(--space-md);
+}
+
+.week-cell {
+    background: var(--surface);
+    border-radius: 4pt;
+    padding: 6pt 4pt;
+    text-align: center;
+    break-inside: avoid;
+}
+
+.week-cell__day {
+    font-size: 7.5pt;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 3pt;
+}
+
+.week-cell__focus {
+    font-size: 8pt;
+    font-weight: 700;
+    color: var(--ink);
+    margin-bottom: 3pt;
+}
+
+.week-cell__sets {
+    font-family: var(--font-mono);
+    font-size: 9pt;
+    color: var(--accent);
+}
+
+.week-cell--rest { background: #F9FAFB; }
+.week-cell--rest .week-cell__focus { color: var(--muted); font-weight: 400; }

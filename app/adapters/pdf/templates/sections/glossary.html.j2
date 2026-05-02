@@ -1,0 +1,80 @@
+<div class="page-break-before">
+  <div class="section-header">
+    <h2>Glossary &amp; Next Steps</h2>
+  </div>
+
+  <div class="two-col" style="margin-bottom: var(--space-lg);">
+    <div>
+      <h4 style="margin-bottom: var(--space-sm);">Fitness Terms</h4>
+      <table class="info-table">
+        <tbody>
+          <tr><td><strong>1RM</strong></td>
+              <td>One-rep max — the maximum weight you can lift for a single rep</td></tr>
+          <tr><td><strong>RPE</strong></td>
+              <td>Rate of Perceived Exertion (1–10 scale, 10 = absolute max)</td></tr>
+          <tr><td><strong>RIR</strong></td>
+              <td>Reps in Reserve — how many more reps you could have done</td></tr>
+          <tr><td><strong>MEV</strong></td>
+              <td>Minimum Effective Volume — fewest sets needed to maintain</td></tr>
+          <tr><td><strong>MAV</strong></td>
+              <td>Maximum Adaptive Volume — optimal set range for growth</td></tr>
+          <tr><td><strong>MRV</strong></td>
+              <td>Maximum Recoverable Volume — upper limit before overreaching</td></tr>
+          <tr><td><strong>Deload</strong></td>
+              <td>Planned low-intensity week for recovery and supercompensation</td></tr>
+          <tr><td><strong>Block</strong></td>
+              <td>A 5-week training cycle (weeks 1–4 loading, week 5 deload)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <h4 style="margin-bottom: var(--space-sm);">Nutrition Terms</h4>
+      <table class="info-table">
+        <tbody>
+          <tr><td><strong>TDEE</strong></td>
+              <td>Total Daily Energy Expenditure — calories burned per day</td></tr>
+          <tr><td><strong>BMR</strong></td>
+              <td>Basal Metabolic Rate — calories needed at complete rest</td></tr>
+          <tr><td><strong>Macros</strong></td>
+              <td>Macronutrients — protein, fat, and carbohydrates</td></tr>
+          <tr><td><strong>LBM</strong></td>
+              <td>Lean Body Mass — bodyweight minus fat tissue</td></tr>
+          <tr><td><strong>Recomp</strong></td>
+              <td>Body recomposition — simultaneous fat loss and muscle gain</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section-header">
+    <h2>Progress Tracking</h2>
+  </div>
+  <table class="info-table">
+    <thead>
+      <tr>
+        <th>Week</th>
+        <th>Bodyweight (kg)</th>
+        <th>Main Lift Load (kg)</th>
+        <th>Energy / Sleep</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for w in range(1, 6) %}
+      <tr>
+        <td class="mono">{{ w }}{% if w == 5 %} <span class="badge badge-deload">Deload</span>{% endif %}</td>
+        <td style="border-bottom: 0.5pt solid var(--border); min-width: 60pt;">_______</td>
+        <td style="border-bottom: 0.5pt solid var(--border); min-width: 80pt;">_______</td>
+        <td style="border-bottom: 0.5pt solid var(--border); min-width: 70pt;">_______</td>
+        <td style="border-bottom: 0.5pt solid var(--border); min-width: 100pt;"></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="callout callout--info" style="margin-top: var(--space-lg);">
+    <p><strong>Check-in reminder:</strong> After each week, send your coach a brief check-in via Telegram.
+    Include your top-set loads, any pain or discomfort, and how your energy/sleep has been.
+    Your plan will be auto-calibrated based on your response.</p>
+  </div>
+</div>

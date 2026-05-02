@@ -1,0 +1,178 @@
+# Workout generation constants
+
+[volume_budget]
+beginner_base_sets    = 12
+intermediate_base_sets = 16
+advanced_base_sets    = 20
+deload_factor   = 0.7
+deload_min_sets = 1
+
+[periodization]
+rpe_map          = [7.0, 7.5, 8.0, 9.0, 6.0]
+block_length     = 5
+deload_week      = 5
+default_rpe      = 7.0
+deload_load_factor = 0.6
+
+[session]
+max_fatigue = 20
+
+[sets]
+main_lift_sets         = 4
+main_lift_sets_deload  = 3
+accessory_sets         = 3
+accessory_sets_deload  = 2
+isolation_sets         = 3
+isolation_sets_deload  = 2
+
+[reps]
+main_lift_reps         = "5-8"
+main_lift_reps_deload  = "6-10"
+accessory_reps         = "8-12"
+accessory_reps_deload  = "10-12"
+isolation_reps         = "12-15"
+isolation_reps_deload  = "15-20"
+
+# ── Day-type templates ────────────────────────────────────────────────────────
+# Each slot: type, pattern (movement_pattern), muscle (primary_muscle),
+#            min_fat / max_fat (fatigue_cost range),
+#            sets (key into [sets]), reps (key into [reps])
+# ─────────────────────────────────────────────────────────────────────────────
+
+[day_templates.Push]
+slots = [
+  { type = "main_compound",      pattern = "horizontal_push", muscle = "chest",       min_fat = 4, max_fat = 5, sets = "main_lift_sets", reps = "main_lift_reps" },
+  { type = "secondary_compound", pattern = "vertical_push",   muscle = "front_delts", min_fat = 3, max_fat = 4, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "accessory",          pattern = "horizontal_push", muscle = "upper_chest", min_fat = 2, max_fat = 3, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "isolation",          pattern = "isolation",       muscle = "side_delts",  min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+  { type = "isolation",          pattern = "isolation",       muscle = "triceps",     min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+]
+
+[day_templates.Pull]
+slots = [
+  { type = "main_compound",      pattern = "horizontal_pull", muscle = "lats",      min_fat = 4, max_fat = 5, sets = "main_lift_sets", reps = "main_lift_reps" },
+  { type = "secondary_compound", pattern = "vertical_pull",   muscle = "lats",      min_fat = 3, max_fat = 4, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "accessory",          pattern = "horizontal_pull", muscle = "mid_back",  min_fat = 2, max_fat = 3, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "isolation",          pattern = "isolation",       muscle = "rear_delts", min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+  { type = "isolation",          pattern = "isolation",       muscle = "biceps",    min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+]
+
+[day_templates.Legs]
+slots = [
+  { type = "main_compound",      pattern = "squat",     muscle = "quadriceps", min_fat = 4, max_fat = 5, sets = "main_lift_sets", reps = "main_lift_reps" },
+  { type = "secondary_compound", pattern = "hinge",     muscle = "hamstrings", min_fat = 3, max_fat = 4, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "accessory",          pattern = "lunge",     muscle = "glutes",     min_fat = 2, max_fat = 3, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "isolation",          pattern = "isolation", muscle = "quadriceps", min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+  { type = "isolation",          pattern = "isolation", muscle = "hamstrings", min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+  { type = "isolation",          pattern = "isolation", muscle = "calves",     min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+]
+
+[day_templates.Upper]
+slots = [
+  { type = "main_compound",      pattern = "horizontal_push", muscle = "chest",      min_fat = 4, max_fat = 5, sets = "main_lift_sets", reps = "main_lift_reps" },
+  { type = "secondary_compound", pattern = "horizontal_pull", muscle = "lats",       min_fat = 3, max_fat = 4, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "accessory",          pattern = "vertical_push",   muscle = "front_delts", min_fat = 2, max_fat = 3, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "accessory",          pattern = "vertical_pull",   muscle = "mid_back",   min_fat = 2, max_fat = 3, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "isolation",          pattern = "isolation",       muscle = "triceps",    min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+  { type = "isolation",          pattern = "isolation",       muscle = "biceps",     min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+]
+
+[day_templates.Lower]
+slots = [
+  { type = "main_compound",      pattern = "squat",     muscle = "quadriceps", min_fat = 4, max_fat = 5, sets = "main_lift_sets", reps = "main_lift_reps" },
+  { type = "secondary_compound", pattern = "hinge",     muscle = "hamstrings", min_fat = 3, max_fat = 4, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "accessory",          pattern = "lunge",     muscle = "glutes",     min_fat = 2, max_fat = 3, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "isolation",          pattern = "isolation", muscle = "quadriceps", min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+  { type = "isolation",          pattern = "isolation", muscle = "hamstrings", min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+  { type = "isolation",          pattern = "isolation", muscle = "calves",     min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+]
+
+[day_templates.Full_Body_A]
+slots = [
+  { type = "main_compound",      pattern = "squat",          muscle = "quadriceps", min_fat = 4, max_fat = 5, sets = "main_lift_sets", reps = "main_lift_reps" },
+  { type = "secondary_compound", pattern = "horizontal_push", muscle = "chest",     min_fat = 3, max_fat = 4, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "accessory",          pattern = "horizontal_pull", muscle = "lats",      min_fat = 2, max_fat = 3, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "isolation",          pattern = "isolation",       muscle = "hamstrings", min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+  { type = "isolation",          pattern = "isolation",       muscle = "triceps",   min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+]
+
+[day_templates.Full_Body_B]
+slots = [
+  { type = "main_compound",      pattern = "hinge",          muscle = "hamstrings", min_fat = 4, max_fat = 5, sets = "main_lift_sets", reps = "main_lift_reps" },
+  { type = "secondary_compound", pattern = "vertical_push",  muscle = "front_delts", min_fat = 3, max_fat = 4, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "accessory",          pattern = "vertical_pull",  muscle = "lats",       min_fat = 2, max_fat = 3, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "isolation",          pattern = "isolation",      muscle = "quadriceps", min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+  { type = "isolation",          pattern = "isolation",      muscle = "biceps",     min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+]
+
+[day_templates.Squat_Day]
+slots = [
+  { type = "main_compound",      pattern = "squat",     muscle = "quadriceps", min_fat = 4, max_fat = 5, sets = "main_lift_sets", reps = "main_lift_reps" },
+  { type = "secondary_compound", pattern = "squat",     muscle = "quadriceps", min_fat = 3, max_fat = 4, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "accessory",          pattern = "hinge",     muscle = "hamstrings", min_fat = 2, max_fat = 3, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "isolation",          pattern = "isolation", muscle = "quadriceps", min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+  { type = "isolation",          pattern = "isolation", muscle = "calves",     min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+]
+
+[day_templates.Bench_Day]
+slots = [
+  { type = "main_compound",      pattern = "horizontal_push", muscle = "chest",      min_fat = 4, max_fat = 5, sets = "main_lift_sets", reps = "main_lift_reps" },
+  { type = "secondary_compound", pattern = "horizontal_push", muscle = "upper_chest", min_fat = 3, max_fat = 4, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "accessory",          pattern = "horizontal_pull", muscle = "mid_back",   min_fat = 2, max_fat = 3, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "isolation",          pattern = "isolation",       muscle = "triceps",    min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+  { type = "isolation",          pattern = "isolation",       muscle = "front_delts", min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+]
+
+[day_templates.Deadlift_Day]
+slots = [
+  { type = "main_compound",      pattern = "hinge",          muscle = "hamstrings", min_fat = 4, max_fat = 5, sets = "main_lift_sets", reps = "main_lift_reps" },
+  { type = "secondary_compound", pattern = "hinge",          muscle = "glutes",     min_fat = 3, max_fat = 4, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "accessory",          pattern = "horizontal_pull", muscle = "lats",      min_fat = 2, max_fat = 3, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "isolation",          pattern = "isolation",       muscle = "hamstrings", min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+  { type = "isolation",          pattern = "isolation",       muscle = "glutes",    min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+]
+
+[day_templates.Accessory_GPP]
+slots = [
+  { type = "main_compound",      pattern = "vertical_pull",  muscle = "lats",       min_fat = 3, max_fat = 4, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "secondary_compound", pattern = "lunge",          muscle = "glutes",     min_fat = 2, max_fat = 3, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "accessory",          pattern = "vertical_push",  muscle = "front_delts", min_fat = 2, max_fat = 3, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "isolation",          pattern = "isolation",      muscle = "biceps",     min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+  { type = "isolation",          pattern = "isolation",      muscle = "side_delts", min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+]
+
+[day_templates.Upper_Power]
+slots = [
+  { type = "main_compound",      pattern = "horizontal_push", muscle = "chest",       min_fat = 4, max_fat = 5, sets = "main_lift_sets", reps = "main_lift_reps" },
+  { type = "secondary_compound", pattern = "vertical_push",   muscle = "front_delts", min_fat = 3, max_fat = 4, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "accessory",          pattern = "horizontal_pull", muscle = "mid_back",    min_fat = 2, max_fat = 3, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "isolation",          pattern = "isolation",       muscle = "triceps",     min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+  { type = "isolation",          pattern = "isolation",       muscle = "side_delts",  min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+]
+
+[day_templates.Lower_Power]
+slots = [
+  { type = "main_compound",      pattern = "squat",     muscle = "quadriceps", min_fat = 4, max_fat = 5, sets = "main_lift_sets", reps = "main_lift_reps" },
+  { type = "secondary_compound", pattern = "hinge",     muscle = "hamstrings", min_fat = 3, max_fat = 4, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "accessory",          pattern = "lunge",     muscle = "glutes",     min_fat = 2, max_fat = 3, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "isolation",          pattern = "isolation", muscle = "quadriceps", min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+  { type = "isolation",          pattern = "isolation", muscle = "hamstrings", min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+]
+
+[day_templates.Upper_Hypertrophy]
+slots = [
+  { type = "main_compound",      pattern = "horizontal_push", muscle = "upper_chest", min_fat = 3, max_fat = 4, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "secondary_compound", pattern = "horizontal_pull", muscle = "lats",        min_fat = 3, max_fat = 4, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "accessory",          pattern = "vertical_pull",   muscle = "mid_back",    min_fat = 2, max_fat = 3, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "isolation",          pattern = "isolation",       muscle = "triceps",     min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+  { type = "isolation",          pattern = "isolation",       muscle = "biceps",      min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+]
+
+[day_templates.Lower_Hypertrophy]
+slots = [
+  { type = "main_compound",      pattern = "squat",     muscle = "quadriceps", min_fat = 3, max_fat = 4, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "secondary_compound", pattern = "lunge",     muscle = "glutes",     min_fat = 2, max_fat = 3, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "accessory",          pattern = "hinge",     muscle = "hamstrings", min_fat = 2, max_fat = 3, sets = "accessory_sets", reps = "accessory_reps" },
+  { type = "isolation",          pattern = "isolation", muscle = "hamstrings", min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+  { type = "isolation",          pattern = "isolation", muscle = "calves",     min_fat = 1, max_fat = 2, sets = "isolation_sets", reps = "isolation_reps" },
+]
