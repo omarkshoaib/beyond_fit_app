@@ -4,6 +4,7 @@ import '../features/auth/login_screen.dart';
 import '../features/auth/register_screen.dart';
 import '../features/auth/forgot_password_screen.dart';
 import '../features/auth/reset_password_screen.dart';
+import '../features/auth/verify_email_screen.dart';
 import '../features/onboarding/onboarding_screen.dart';
 import '../features/home/home_screen.dart';
 import '../features/workout/workout_screen.dart';
@@ -34,7 +35,8 @@ final router = GoRouter(
     final isPublic = loc == '/login' ||
         loc == '/register' ||
         loc == '/forgot' ||
-        loc == '/reset';
+        loc == '/reset' ||
+        loc == '/verify';
 
     if (token == null && !isPublic) return '/login';
     if (token != null && (loc == '/login' || loc == '/register')) return '/home';
@@ -49,6 +51,13 @@ final router = GoRouter(
       pageBuilder: (c, s) {
         final token = s.uri.queryParameters['token'] ?? '';
         return _fade(ResetPasswordScreen(token: token));
+      },
+    ),
+    GoRoute(
+      path: '/verify',
+      pageBuilder: (c, s) {
+        final token = s.uri.queryParameters['token'] ?? '';
+        return _fade(VerifyEmailScreen(token: token));
       },
     ),
     GoRoute(path: '/onboarding', pageBuilder: (c, s) => _fade(const OnboardingScreen())),

@@ -162,11 +162,74 @@ class _HomeScreenState extends State<HomeScreen> {
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          if (_profile != null && !_profile!.isVerified) ...[
+            _UnverifiedBanner(email: _profile!.email),
+            const SizedBox(height: 12),
+          ],
           _WeekBadge(weekNumber: _profile?.weekNumber ?? 1),
           const SizedBox(height: 20),
           _TodayCard(session: _today!),
           const SizedBox(height: 16),
           const _QuickActions(),
+        ],
+      ),
+    );
+  }
+}
+
+class _UnverifiedBanner extends StatefulWidget {
+  final String email;
+  const _UnverifiedBanner({required this.email});
+
+  @override
+  State<_UnverifiedBanner> createState() => _UnverifiedBannerState();
+}
+
+class _UnverifiedBannerState extends State<_UnverifiedBanner> {
+  bool _sending = false;
+  bool _sent = false;
+
+  Future<void> _resend() async {
+    setState(() => _sending = true);
+    try {
+      await AuthApi.resendVerification();
+      if (mounted) setState(() { _sent = true; _sending = false; });
+    } catch (_) {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.amber.withValues(alpha: 0.13),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.amber.withValues(alpha: 0.4), width: 1),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.mark_email_unread_outlined, color: Colors.amber, size: 22),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              _sent
+                  ? 'Verification email sent to ${widget.email}'
+                  : 'Verify your email to secure your account',
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+            ),
+          ),
+          if (!_sent)
+            TextButton(
+              onPressed: _sending ? null : _resend,
+              style: TextButton.styleFrom(foregroundColor: Colors.amber),
+              child: _sending
+                  ? const SizedBox(
+                      width: 16, height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.amber))
+                  : const Text('Resend'),
+            ),
         ],
       ),
     );

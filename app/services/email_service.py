@@ -45,6 +45,44 @@ class EmailService:
             return False
 
     @staticmethod
+    def send_verification(recipient_email: str, verify_token: str, client_name: str = "Athlete") -> bool:
+        """Send an email verification link to a freshly registered user."""
+        smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+        smtp_port = int(os.getenv("SMTP_PORT", "587"))
+        smtp_email = os.getenv("SMTP_EMAIL") or os.getenv("SMTP_USER")
+        smtp_pwd = os.getenv("SMTP_PASSWORD")
+        app_base_url = os.getenv("APP_BASE_URL", "https://beyondfit.app")
+
+        if not smtp_email or not smtp_pwd:
+            logging.error("Missing SMTP credentials — cannot send verify email")
+            return False
+
+        verify_url = f"{app_base_url}/verify?token={verify_token}"
+
+        msg = EmailMessage()
+        msg["Subject"] = "Beyond Fit — verify your email"
+        msg["From"] = smtp_email
+        msg["To"] = recipient_email
+        msg.set_content(
+            f"Hi {client_name},\n\n"
+            f"Welcome to Beyond Fit. Confirm your email address within 48 hours:\n\n"
+            f"{verify_url}\n\n"
+            f"If you didn't create an account, you can ignore this email.\n\n"
+            f"— Beyond Fit"
+        )
+
+        try:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+                server.starttls()
+                server.login(smtp_email, smtp_pwd)
+                server.send_message(msg)
+            logging.info(f"Verification email sent to {recipient_email}")
+            return True
+        except (smtplib.SMTPException, OSError, ValueError) as e:
+            logging.error(f"Failed to send verify email to {recipient_email}: {e}", exc_info=True)
+            return False
+
+    @staticmethod
     def send_password_reset(recipient_email: str, reset_token: str, client_name: str = "Athlete") -> bool:
         """Send a password-reset email with a deep-link to the mobile app."""
         smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")

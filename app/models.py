@@ -28,6 +28,7 @@ class ClientProfile(SQLModel, table=True):
     is_coach: bool = Field(default=False)
     is_admin: bool = Field(default=False)
     coach_id: Optional[str] = Field(default=None, index=True)
+    verified_at: Optional[datetime] = Field(default=None)
     limitations: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     available_equipment: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     week_number: int = 1

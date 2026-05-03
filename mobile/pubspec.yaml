@@ -33,12 +33,38 @@ dependencies:
   # UI utilities
   intl: ^0.20.2
 
+  # Deep links (universal links + custom scheme)
+  app_links: ^6.3.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
   build_runner: ^2.4.15
   riverpod_generator: ^2.6.1
+  flutter_launcher_icons: ^0.14.2
+  flutter_native_splash: ^2.4.4
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/icon_source.png
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon_source.png"
+  remove_alpha_ios: true
+  background_color_ios: "#1E88E5"
+  adaptive_icon_background: "#121212"
+  adaptive_icon_foreground: "assets/icon_source.png"
+
+flutter_native_splash:
+  color: "#121212"
+  image: assets/icon_source.png
+  android_12:
+    color: "#121212"
+    image: assets/icon_source.png
+  ios: true
+  android: true
+  web: false

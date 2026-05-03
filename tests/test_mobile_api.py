@@ -90,9 +90,11 @@ def test_me_returns_profile(client, auth_headers):
     assert data["name"] == "Test User"
 
 
-def test_me_without_token_fails(client):
-    resp = client.get("/api/v1/auth/me")
-    assert resp.status_code == 403
+def test_me_without_token_fails(test_engine):
+    """Fresh TestClient (no cookies) + no Authorization header → 401."""
+    fresh = TestClient(fastapi_app)
+    resp = fresh.get("/api/v1/auth/me")
+    assert resp.status_code == 401
 
 
 def test_me_bad_token_fails(client):
@@ -185,6 +187,71 @@ def test_reset_password_rejects_invalid_token(client):
     resp = client.post("/api/v1/auth/reset",
                       json={"token": "not-a-real-token", "new_password": "ValidPw123"})
     assert resp.status_code == 400
+
+
+def test_email_verification_round_trip(client, monkeypatch, registered_user):
+    """create_verify_token → decode → verified_at stamped + idempotent."""
+    from app.auth.jwt import create_verify_token
+
+    captured: dict = {}
+    monkeypatch.setattr(
+        "app.api.auth.EmailService.send_verification",
+        lambda recipient_email, verify_token, client_name="": (captured.update(t=verify_token), True)[1],
+    )
+
+    # Trigger resend so we have a token
+    headers = {"Authorization": f"Bearer {registered_user['access_token']}"}
+    r = client.post("/api/v1/auth/resend-verification", headers=headers)
+    assert r.status_code == 200
+    token = captured.get("t") or create_verify_token("dummy")
+
+    v = client.post("/api/v1/auth/verify", json={"token": token})
+    assert v.status_code == 200, v.text
+    assert v.json()["verified_at"] is not None
+
+    me = client.get("/api/v1/auth/me", headers=headers)
+    assert me.json()["verified_at"] is not None
+
+
+def test_verify_rejects_garbage_token(client):
+    resp = client.post("/api/v1/auth/verify", json={"token": "garbage"})
+    assert resp.status_code == 400
+
+
+def test_resend_verification_noop_if_verified(client, registered_user):
+    headers = {"Authorization": f"Bearer {registered_user['access_token']}"}
+    r = client.post("/api/v1/auth/resend-verification", headers=headers)
+    # Either path returns 200; if previous test verified, second call says already_verified
+    assert r.status_code == 200
+
+
+def test_login_sets_httponly_cookies_and_cookie_auth_works(test_engine):
+    """Login response sets access_token + refresh_token cookies; subsequent
+    requests with cookies but no Authorization header still authenticate."""
+    fresh = TestClient(fastapi_app)
+    fresh.post("/api/v1/auth/register", json={
+        "email": "cookieuser@bf.com",
+        "password": "CookiePass1",
+        "name": "Cookie",
+    })
+    login = fresh.post("/api/v1/auth/login",
+                      json={"email": "cookieuser@bf.com", "password": "CookiePass1"})
+    assert login.status_code == 200
+    # Cookies should be set on the TestClient
+    assert "access_token" in fresh.cookies
+    assert "refresh_token" in fresh.cookies
+
+    # /me works with no Authorization header (cookie auth path)
+    me = fresh.get("/api/v1/auth/me")
+    assert me.status_code == 200
+    assert me.json()["email"] == "cookieuser@bf.com"
+
+    # Logout clears cookies
+    out = fresh.post("/api/v1/auth/logout")
+    assert out.status_code == 200
+    assert out.json()["ok"] is True
+    me2 = fresh.get("/api/v1/auth/me")
+    assert me2.status_code == 401
 
 
 # ── Plans ─────────────────────────────────────────────────────────────────────

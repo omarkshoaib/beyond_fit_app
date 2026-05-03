@@ -56,4 +56,12 @@ class AuthApi {
       refreshToken: resp.data['refresh_token'] as String,
     );
   }
+
+  static Future<void> verifyEmail(String token) async {
+    await _dio.post('/auth/verify', data: {'token': token});
+  }
+
+  static Future<void> resendVerification() async {
+    await _dio.post('/auth/resend-verification');
+  }
 }

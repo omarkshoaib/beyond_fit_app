@@ -1,0 +1,14 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["TEAMID.com.beyondfit.beyond_fit"],
+        "components": [
+          { "/": "/reset", "?": { "token": "?*" }, "comment": "Password reset deep link" },
+          { "/": "/verify", "?": { "token": "?*" }, "comment": "Email verification deep link" },
+          { "/": "/coach/review/*", "comment": "Coach plan review deep link" }
+        ]
+      }
+    ]
+  }
+}

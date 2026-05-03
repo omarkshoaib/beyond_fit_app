@@ -11,6 +11,7 @@ class UserProfile {
   final bool isCoach;
   final bool isAdmin;
   final String? coachId;
+  final String? verifiedAt;
 
   const UserProfile({
     required this.clientId,
@@ -25,7 +26,10 @@ class UserProfile {
     this.isCoach = false,
     this.isAdmin = false,
     this.coachId,
+    this.verifiedAt,
   });
+
+  bool get isVerified => verifiedAt != null;
 
   factory UserProfile.fromJson(Map<String, dynamic> j) => UserProfile(
         clientId: j['client_id'] as String,
@@ -40,6 +44,7 @@ class UserProfile {
         isCoach: j['is_coach'] as bool? ?? false,
         isAdmin: j['is_admin'] as bool? ?? false,
         coachId: j['coach_id'] as String?,
+        verifiedAt: j['verified_at'] as String?,
       );
 }
 

@@ -10,6 +10,7 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24h
 REFRESH_TOKEN_EXPIRE_DAYS = 30
 RESET_TOKEN_EXPIRE_MINUTES = 30
+VERIFY_TOKEN_EXPIRE_HOURS = 48
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -60,6 +61,26 @@ def decode_reset_token(token: str) -> Optional[str]:
     try:
         payload = jwt.decode(token, _secret_key(), algorithms=[ALGORITHM])
         if payload.get("type") != "password_reset":
+            return None
+        return payload.get("sub")
+    except JWTError:
+        return None
+
+
+def create_verify_token(subject: str) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(hours=VERIFY_TOKEN_EXPIRE_HOURS)
+    return jwt.encode(
+        {"sub": subject, "exp": expire, "type": "email_verify"},
+        _secret_key(),
+        algorithm=ALGORITHM,
+    )
+
+
+def decode_verify_token(token: str) -> Optional[str]:
+    """Return subject only if token is a non-expired email_verify token."""
+    try:
+        payload = jwt.decode(token, _secret_key(), algorithms=[ALGORITHM])
+        if payload.get("type") != "email_verify":
             return None
         return payload.get("sub")
     except JWTError:
