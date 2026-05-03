@@ -1,0 +1,779 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Beyond Fit — Deterministic Coaching Engine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..900,0..100&family=Crimson+Pro:ital,wght@0,200..900;1,200..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap"
+  rel="stylesheet" />
+<style>
+  /* ───────────────────────────────────────────────────────────────────
+     Beyond Fit — landing page.
+     Aesthetic: olympic-engineering manual. Cream + ink + signal-red.
+     Type: Fraunces (variable serif, optical sizing) + Crimson Pro
+     (refined body) + JetBrains Mono (figures + technical labels).
+     ─────────────────────────────────────────────────────────────────── */
+
+  :root {
+    --ink: #0a0908;
+    --ink-soft: #2a2724;
+    --paper: #f4ede1;
+    --paper-warm: #ecdfca;
+    --signal: #c8443a;
+    --rule: rgba(10, 9, 8, 0.18);
+    --rule-strong: rgba(10, 9, 8, 0.42);
+
+    --serif: "Fraunces", "Times New Roman", serif;
+    --body: "Crimson Pro", Georgia, serif;
+    --mono: "JetBrains Mono", "Courier New", monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { font-size: clamp(15px, 1vw + 0.5rem, 18px); }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--body);
+    font-weight: 400;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+    position: relative;
+  }
+
+  /* Paper grain — subtle noise via SVG turbulence */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.42;
+    z-index: 1;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    mix-blend-mode: multiply;
+  }
+
+  /* Top fixed signal stripe — like an old paperback cover bar */
+  .marker {
+    position: fixed; top: 0; left: 0; right: 0;
+    height: 4px; background: var(--signal);
+    z-index: 100;
+  }
+
+  /* Top grid: brand + nav, monospace labels */
+  .topbar {
+    position: relative;
+    z-index: 5;
+    border-bottom: 1px solid var(--rule);
+    padding: 1.4rem 2.5vw;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 2rem;
+  }
+  .brand {
+    font-family: var(--serif);
+    font-variation-settings: "opsz" 144, "wght" 760;
+    font-size: 1.25rem;
+    letter-spacing: -0.02em;
+    text-transform: lowercase;
+  }
+  .brand .ampersand {
+    font-style: italic;
+    font-variation-settings: "opsz" 144, "wght" 360;
+  }
+  .nav {
+    justify-self: center;
+    display: flex; gap: 2.4rem;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+  }
+  .nav a {
+    color: var(--ink);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    padding-bottom: 4px;
+    transition: border-color 200ms ease;
+  }
+  .nav a:hover { border-color: var(--signal); }
+  .topbar .meta {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    color: var(--ink-soft);
+  }
+
+  /* ─── HERO ──────────────────────────────────────────────────────── */
+  .hero {
+    position: relative;
+    padding: 3vw 2.5vw 6vw;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: end;
+    min-height: 84vh;
+    z-index: 4;
+  }
+  .hero-meta {
+    grid-column: 1 / 2;
+    align-self: start;
+    padding-top: 1rem;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    color: var(--ink-soft);
+    display: grid;
+    gap: 0.6rem;
+    border-left: 1px solid var(--rule-strong);
+    padding-left: 1rem;
+  }
+  .hero-meta b { color: var(--ink); font-weight: 700; }
+
+  .hero-headline {
+    grid-column: 1 / -1;
+    font-family: var(--serif);
+    font-variation-settings: "opsz" 144, "wght" 360, "SOFT" 0;
+    font-size: clamp(4.5rem, 17vw, 22rem);
+    line-height: 0.82;
+    letter-spacing: -0.045em;
+    margin-top: 1.5rem;
+    transition: font-variation-settings 600ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    will-change: font-variation-settings;
+  }
+  .hero-headline .ital {
+    font-style: italic;
+    font-variation-settings: "opsz" 144, "wght" 460, "SOFT" 100;
+    color: var(--signal);
+  }
+  .hero-headline .ampersand {
+    font-style: italic;
+    font-variation-settings: "opsz" 144, "wght" 280;
+    color: var(--ink-soft);
+  }
+  .hero-headline:hover {
+    font-variation-settings: "opsz" 144, "wght" 760, "SOFT" 0;
+  }
+
+  .hero-side {
+    grid-column: 2 / 3;
+    align-self: start;
+    text-align: right;
+    padding-top: 1rem;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    color: var(--ink-soft);
+  }
+  .hero-side b { display: block; color: var(--ink); font-size: 0.85rem; margin-bottom: 4px; }
+
+  .hero-subline {
+    grid-column: 1 / -1;
+    margin-top: 2.5rem;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 3rem;
+    align-items: end;
+    border-top: 1px solid var(--rule-strong);
+    padding-top: 1.4rem;
+  }
+  .hero-subline p {
+    font-family: var(--body);
+    font-style: italic;
+    font-size: clamp(1.1rem, 1.6vw, 1.5rem);
+    line-height: 1.35;
+    max-width: 38ch;
+    color: var(--ink);
+  }
+  .hero-cta {
+    display: flex; gap: 1rem; align-items: center;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+  }
+  .hero-cta .btn {
+    padding: 0.95rem 1.5rem;
+    background: var(--ink);
+    color: var(--paper);
+    text-decoration: none;
+    transition: background 200ms ease, transform 200ms ease;
+    border: 1px solid var(--ink);
+  }
+  .hero-cta .btn:hover { background: var(--signal); border-color: var(--signal); transform: translate(-2px, -2px); box-shadow: 4px 4px 0 var(--ink); }
+  .hero-cta .btn-ghost {
+    padding: 0.95rem 1.5rem;
+    background: transparent;
+    color: var(--ink);
+    text-decoration: none;
+    border: 1px solid var(--ink);
+    transition: background 200ms ease;
+  }
+  .hero-cta .btn-ghost:hover { background: var(--ink); color: var(--paper); }
+
+  /* Decorative barbell SVG, large + rotated, behind hero */
+  .barbell-deco {
+    position: absolute;
+    right: -8vw; top: 8vw;
+    width: 60vw; height: auto;
+    opacity: 0.06;
+    pointer-events: none;
+    transform: rotate(-12deg);
+    z-index: -1;
+  }
+
+  /* ─── SECTION SCAFFOLD ──────────────────────────────────────────── */
+  section { position: relative; z-index: 3; }
+  .section-label {
+    display: flex; align-items: center; gap: 1rem;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    color: var(--ink-soft);
+    padding: 0 2.5vw;
+    margin-bottom: 2rem;
+  }
+  .section-label::before {
+    content: "";
+    width: 60px; height: 1px;
+    background: var(--ink-soft);
+  }
+  .section-label .num {
+    color: var(--signal); font-weight: 700;
+  }
+
+  .section-title {
+    font-family: var(--serif);
+    font-variation-settings: "opsz" 144, "wght" 380;
+    font-size: clamp(2.5rem, 7vw, 7rem);
+    line-height: 0.95;
+    letter-spacing: -0.025em;
+    padding: 0 2.5vw;
+    margin-bottom: 4rem;
+    max-width: 18ch;
+  }
+  .section-title em {
+    font-style: italic;
+    font-variation-settings: "opsz" 144, "wght" 380, "SOFT" 100;
+    color: var(--signal);
+  }
+
+  /* ─── HOW IT WORKS — numbered timeline blueprint ────────────────── */
+  .how {
+    padding: 8vw 0 10vw;
+    border-top: 1px solid var(--rule);
+    background-image:
+      linear-gradient(var(--rule) 1px, transparent 1px),
+      linear-gradient(90deg, var(--rule) 1px, transparent 1px);
+    background-size: 64px 64px;
+    background-position: -1px -1px;
+  }
+  .how-rows {
+    padding: 0 2.5vw;
+    display: grid;
+    gap: 1px;
+    background: var(--rule-strong);
+    border-top: 1px solid var(--rule-strong);
+    border-bottom: 1px solid var(--rule-strong);
+  }
+  .how-row {
+    background: var(--paper);
+    display: grid;
+    grid-template-columns: 6rem 1fr 2fr 1fr;
+    align-items: start;
+    gap: 2rem;
+    padding: 2.4rem 0;
+  }
+  .how-row .num {
+    font-family: var(--serif);
+    font-variation-settings: "opsz" 144, "wght" 280;
+    font-size: 4.5rem;
+    line-height: 0.9;
+    color: var(--ink);
+  }
+  .how-row .num sup {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--signal);
+    vertical-align: super;
+  }
+  .how-row h3 {
+    font-family: var(--serif);
+    font-variation-settings: "opsz" 80, "wght" 540;
+    font-size: 1.7rem;
+    letter-spacing: -0.015em;
+    line-height: 1.05;
+  }
+  .how-row p {
+    font-size: 1.05rem;
+    line-height: 1.55;
+    max-width: 48ch;
+  }
+  .how-row .tag {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    color: var(--ink-soft);
+    text-align: right;
+    line-height: 1.6;
+  }
+
+  /* ─── THE MATH — code-style callout ─────────────────────────────── */
+  .math {
+    padding: 8vw 2.5vw;
+    background: var(--ink);
+    color: var(--paper);
+    position: relative;
+    overflow: hidden;
+  }
+  .math::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+      radial-gradient(rgba(244, 237, 225, 0.12) 1px, transparent 1px);
+    background-size: 24px 24px;
+    pointer-events: none;
+    mask-image: linear-gradient(180deg, transparent, #fff 30%, #fff 70%, transparent);
+  }
+  .math .section-label { color: var(--paper-warm); }
+  .math .section-label::before { background: var(--paper-warm); }
+  .math .section-title { color: var(--paper); }
+  .math .section-title em { color: var(--signal); }
+  .math-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    border-top: 1px solid rgba(244, 237, 225, 0.18);
+    border-bottom: 1px solid rgba(244, 237, 225, 0.18);
+  }
+  .math-cell {
+    padding: 3rem 2.5rem;
+    border-right: 1px solid rgba(244, 237, 225, 0.18);
+  }
+  .math-cell:last-child { border-right: none; }
+  .math-cell h4 {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    color: var(--paper-warm);
+    margin-bottom: 1.2rem;
+  }
+  .math-cell pre {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    line-height: 1.65;
+    color: var(--paper);
+    white-space: pre-wrap;
+  }
+  .math-cell pre .k { color: #ffba6f; }
+  .math-cell pre .c { color: #b9aa92; font-style: italic; }
+  .math-cell pre .n { color: #ffd57e; }
+  .math-cell .caption {
+    margin-top: 1.5rem;
+    font-family: var(--body);
+    font-style: italic;
+    font-size: 1.05rem;
+    color: var(--paper-warm);
+    line-height: 1.4;
+    max-width: 32ch;
+  }
+
+  /* ─── ROLES — editorial 4-row table ─────────────────────────────── */
+  .roles {
+    padding: 8vw 2.5vw;
+  }
+  .roles-table {
+    width: 100%;
+    border-collapse: collapse;
+    border-top: 2px solid var(--ink);
+    border-bottom: 2px solid var(--ink);
+  }
+  .roles-table tr { border-bottom: 1px solid var(--rule-strong); }
+  .roles-table tr:last-child { border-bottom: none; }
+  .roles-table th, .roles-table td {
+    padding: 1.6rem 1rem;
+    text-align: left;
+    vertical-align: top;
+  }
+  .roles-table th {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    color: var(--ink-soft);
+    font-weight: 500;
+    width: 20%;
+  }
+  .roles-table .role-name {
+    font-family: var(--serif);
+    font-variation-settings: "opsz" 80, "wght" 600;
+    font-size: 1.6rem;
+    letter-spacing: -0.01em;
+    line-height: 1.05;
+    width: 28%;
+  }
+  .roles-table .role-name small {
+    display: block;
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    color: var(--signal);
+    margin-top: 0.5rem;
+    font-weight: 400;
+  }
+  .roles-table .role-can {
+    font-size: 1.02rem;
+    line-height: 1.55;
+  }
+  .roles-table .role-meta {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--ink-soft);
+    text-align: right;
+    line-height: 1.6;
+  }
+
+  /* ─── CTA strip ─────────────────────────────────────────────────── */
+  .cta-strip {
+    padding: 8vw 2.5vw;
+    background: var(--paper-warm);
+    border-top: 1px solid var(--rule-strong);
+    border-bottom: 1px solid var(--rule-strong);
+    text-align: center;
+  }
+  .cta-strip h2 {
+    font-family: var(--serif);
+    font-variation-settings: "opsz" 144, "wght" 360, "SOFT" 0;
+    font-size: clamp(3rem, 8vw, 8rem);
+    line-height: 0.95;
+    letter-spacing: -0.03em;
+    margin-bottom: 2rem;
+  }
+  .cta-strip h2 em {
+    font-style: italic;
+    font-variation-settings: "opsz" 144, "wght" 360, "SOFT" 100;
+    color: var(--signal);
+  }
+  .cta-strip p {
+    font-family: var(--body);
+    font-style: italic;
+    font-size: 1.3rem;
+    max-width: 36ch;
+    margin: 0 auto 3rem;
+    color: var(--ink-soft);
+  }
+
+  /* ─── FOOTER ────────────────────────────────────────────────────── */
+  footer {
+    padding: 3rem 2.5vw 2rem;
+    background: var(--ink);
+    color: var(--paper);
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 2rem;
+    align-items: center;
+  }
+  footer .center {
+    font-family: var(--serif);
+    font-variation-settings: "opsz" 144, "wght" 380;
+    font-size: 1.2rem;
+    text-transform: lowercase;
+    letter-spacing: -0.01em;
+    color: var(--paper);
+  }
+  footer .center .ampersand { font-style: italic; font-variation-settings: "opsz" 144, "wght" 280; color: var(--signal); }
+  footer a { color: var(--paper); text-decoration: none; border-bottom: 1px solid transparent; }
+  footer a:hover { border-color: var(--signal); }
+  footer .right { text-align: right; }
+
+  /* ─── REVEAL animations ─────────────────────────────────────────── */
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(20px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes weight {
+    from { font-variation-settings: "opsz" 144, "wght" 200, "SOFT" 0; opacity: 0; }
+    to   { font-variation-settings: "opsz" 144, "wght" 360, "SOFT" 0; opacity: 1; }
+  }
+  .hero-headline { animation: weight 1400ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+  .hero-meta, .hero-side { animation: rise 900ms cubic-bezier(0.2, 0.8, 0.2, 1) both 200ms; }
+  .hero-subline { animation: rise 900ms cubic-bezier(0.2, 0.8, 0.2, 1) both 600ms; }
+
+  /* ─── RESPONSIVE ────────────────────────────────────────────────── */
+  @media (max-width: 800px) {
+    .topbar { grid-template-columns: 1fr auto; }
+    .topbar .nav { display: none; }
+    .hero { grid-template-columns: 1fr; min-height: auto; padding-top: 6vw; padding-bottom: 10vw; }
+    .hero-side { text-align: left; }
+    .hero-subline { grid-template-columns: 1fr; gap: 1.5rem; }
+    .how-row { grid-template-columns: 4rem 1fr; }
+    .how-row .tag, .how-row p { grid-column: 1 / -1; padding-left: 0; }
+    .math-grid { grid-template-columns: 1fr; }
+    .math-cell { border-right: none; border-bottom: 1px solid rgba(244, 237, 225, 0.18); }
+    .math-cell:last-child { border-bottom: none; }
+    .roles-table th { display: none; }
+    .roles-table tr { display: grid; gap: 0.4rem; padding: 1rem 0; }
+    .roles-table td { padding: 0.4rem 0; }
+    .roles-table .role-meta { text-align: left; }
+    footer { grid-template-columns: 1fr; text-align: center; }
+    footer .right { text-align: center; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  }
+</style>
+</head>
+<body>
+<div class="marker"></div>
+
+<header class="topbar">
+  <div class="brand">beyond<span class="ampersand">&amp;</span>fit</div>
+  <nav class="nav">
+    <a href="#how">How it works</a>
+    <a href="#math">The math</a>
+    <a href="#roles">Roles</a>
+    <a href="#start">Start</a>
+  </nav>
+  <div class="meta">v1.1.0 · est. 2026</div>
+</header>
+
+<main>
+  <section class="hero">
+    <svg class="barbell-deco" viewBox="0 0 600 200" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <g fill="currentColor">
+        <rect x="20" y="80" width="60" height="40" />
+        <rect x="80" y="92" width="20" height="16" />
+        <rect x="100" y="95" width="400" height="10" />
+        <rect x="500" y="92" width="20" height="16" />
+        <rect x="520" y="80" width="60" height="40" />
+      </g>
+      <g stroke="currentColor" stroke-width="2" fill="none">
+        <line x1="100" y1="60" x2="100" y2="140" />
+        <line x1="500" y1="60" x2="500" y2="140" />
+      </g>
+    </svg>
+
+    <div class="hero-meta">
+      <div><b>Volume budgeted.</b> per muscle, per week.</div>
+      <div><b>RPE-driven.</b> next week's load reads last week's effort.</div>
+      <div><b>Human-in-loop.</b> a coach approves every plan, or you self-serve.</div>
+    </div>
+    <div class="hero-side">
+      <div><b>Strength · Hypertrophy</b></div>
+      <div>powerlifter / powerbuilder /<br/>general fitness</div>
+    </div>
+
+    <h1 class="hero-headline">
+      Lift the<br/>
+      <span class="ital">Numbers</span> <span class="ampersand">&amp;</span><br/>
+      the bar.
+    </h1>
+
+    <div class="hero-subline">
+      <p>A coaching engine where every set, rep and kilo is decided by math you can read — not vibes you have to trust. The LLM never picks the exercises. It only narrates them and applies your coach's edits.</p>
+      <div class="hero-cta">
+        <a class="btn" href="#start">Start a Plan</a>
+        <a class="btn-ghost" href="#math">Read the algorithm</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="how" id="how">
+    <div class="section-label"><span class="num">§ 01</span> How it works</div>
+    <h2 class="section-title">From profile to <em>plate</em>, in five<br/>deterministic steps.</h2>
+
+    <div class="how-rows">
+      <div class="how-row">
+        <div class="num">01<sup>·step</sup></div>
+        <h3>Onboard</h3>
+        <p>Pick an avatar — powerlifter, powerbuilder, general fitness. Choose 3 to 6 training days, your experience level, and any injuries. The engine reads each as a constraint, not a preference.</p>
+        <div class="tag">~ 60 sec<br/>4 questions</div>
+      </div>
+      <div class="how-row">
+        <div class="num">02<sup>·step</sup></div>
+        <h3>Resolve the split</h3>
+        <p>Day templates are picked from a fixed table indexed by avatar × frequency. Push / Pull / Legs for some; Upper / Lower / Push / Pull for others. The split is never randomised.</p>
+        <div class="tag">deterministic<br/>tabular lookup</div>
+      </div>
+      <div class="how-row">
+        <div class="num">03<sup>·step</sup></div>
+        <h3>Budget the volume</h3>
+        <p>Per muscle group, weekly sets are gated between MEV (minimum effective) and MRV (max recoverable), scaled by experience level. Deload weeks (every fifth) drop the budget by 40%.</p>
+        <div class="tag">MEV · MRV<br/>by week</div>
+      </div>
+      <div class="how-row">
+        <div class="num">04<sup>·step</sup></div>
+        <h3>Fill the slots</h3>
+        <p>Each day gets three tiers: a main compound (highest fatigue), a secondary, an isolation. Movement-pattern matching, biomechanical synergy, and a per-day fatigue cap keep the session honest.</p>
+        <div class="tag">3 tiers · 12 fatigue<br/>per day</div>
+      </div>
+      <div class="how-row">
+        <div class="num">05<sup>·step</sup></div>
+        <h3>Auto-regulate</h3>
+        <p>You log each set. Next week, the autoregulator reads your actual RPE against the target and corrects the load — minus 4% per RPE point overshot, plus the progressive overload increment. Math, not feel.</p>
+        <div class="tag">RPE error · 4%<br/>per point</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="math" id="math">
+    <div class="section-label"><span class="num">§ 02</span> The math, plainly</div>
+    <h2 class="section-title">No black boxes. <em>Read the source.</em></h2>
+
+    <div class="math-grid">
+      <div class="math-cell">
+        <h4>autoregulator.py · L 30</h4>
+<pre><span class="c"># Next-week load given last week's actual effort.</span>
+<span class="k">def</span> calculate_next_load(
+    last_weight, last_target_rpe,
+    last_actual_rpe, next_target_rpe,
+):
+    err = last_actual_rpe - last_target_rpe
+    base = last_weight * (<span class="n">1</span> - err * <span class="n">0.04</span>)
+    jump = next_target_rpe - last_target_rpe
+    nxt  = base + jump * <span class="n">0.025</span> * base
+    <span class="k">return</span> round(nxt / <span class="n">2.5</span>) * <span class="n">2.5</span></pre>
+        <div class="caption">A single function. Same inputs always produce the same output. No hidden state.</div>
+      </div>
+      <div class="math-cell">
+        <h4>generator.py · L 467</h4>
+<pre><span class="k">def</span> generate(self, client, prior_week=None):
+    self._check_safety(client)        <span class="c"># hard refusals</span>
+    days = self._resolve_split(...)   <span class="c"># tabular</span>
+    budget = self._budget_volume(...) <span class="c"># MEV / MRV</span>
+    rpe = self._calculate_rpe(...)    <span class="c"># 5-week cycle</span>
+    <span class="k">if</span> self._is_deload(week): rpe = min(rpe, <span class="n">6</span>.<span class="n">0</span>)
+    week = WorkoutWeek(
+        days=[ self._fill_slots(d, ...) <span class="k">for</span> d <span class="k">in</span> days ]
+    )
+    self._validate_volume(week)
+    <span class="k">return</span> week</pre>
+        <div class="caption">The whole engine fits on one screen. The LLM never enters this function.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="roles" id="roles">
+    <div class="section-label"><span class="num">§ 03</span> Roles</div>
+    <h2 class="section-title">Four roles. <em>One invariant</em> each.</h2>
+
+    <table class="roles-table">
+      <thead>
+        <tr>
+          <th>Role</th>
+          <th>Granted by</th>
+          <th>Can do</th>
+          <th>Invariant</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="role-name">Client<small>signs up directly</small></td>
+          <td><span class="role-meta">— · public</span></td>
+          <td class="role-can">Onboard, generate plans, log sets, check-in. Receive feedback when a coach rejects.</td>
+          <td class="role-meta">avatar locked<br/>after onboarding</td>
+        </tr>
+        <tr>
+          <td class="role-name">Coach<small>invite-only</small></td>
+          <td><span class="role-meta">admin · invitation</span></td>
+          <td class="role-can">Review pending plans for assigned clients. Approve, reject with feedback, or edit via LLM and re-review.</td>
+          <td class="role-meta">cannot self-register<br/>email pre-allocated</td>
+        </tr>
+        <tr>
+          <td class="role-name">Admin<small>by appointment</small></td>
+          <td><span class="role-meta">super-admin · promote</span></td>
+          <td class="role-can">Invite or withdraw coach invitations. Assign clients to coaches. View every user.</td>
+          <td class="role-meta">audit log writes<br/>on every action</td>
+        </tr>
+        <tr>
+          <td class="role-name">Super-admin<small>hardcoded</small></td>
+          <td><span class="role-meta">— · self-healing</span></td>
+          <td class="role-can">Promote and demote admins. Cannot be demoted. Flags re-asserted on every server boot.</td>
+          <td class="role-meta">single email<br/>immortal</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="cta-strip" id="start">
+    <h2>Stop guessing.<br/><em>Start lifting.</em></h2>
+    <p>Two terminals. Five minutes. A plan that knows your last week.</p>
+    <div class="hero-cta" style="justify-content:center;">
+      <a class="btn" href="#">Sign up</a>
+      <a class="btn-ghost" href="#">Read the docs</a>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="left">deterministic coaching engine · open source</div>
+  <div class="center">beyond<span class="ampersand">&amp;</span>fit</div>
+  <div class="right">est. 2026 · v1.1.0 · <a href="https://github.com/">github</a></div>
+</footer>
+
+<script>
+  // Drift the headline weight axis as the user scrolls — pages with personality
+  // need motion that responds to where you are, not just hover.
+  (function () {
+    const headline = document.querySelector(".hero-headline");
+    if (!headline) return;
+    let ticking = false;
+    function update() {
+      const y = Math.min(window.scrollY, 600);
+      const w = 360 + (y / 600) * 380; // 360 → 740
+      const soft = (y / 600) * 60;
+      headline.style.fontVariationSettings =
+        `"opsz" 144, "wght" ${w.toFixed(0)}, "SOFT" ${soft.toFixed(0)}`;
+      ticking = false;
+    }
+    window.addEventListener(
+      "scroll",
+      () => {
+        if (!ticking) {
+          window.requestAnimationFrame(update);
+          ticking = true;
+        }
+      },
+      { passive: true }
+    );
+  })();
+
+  // Smooth-scroll for in-page anchors
+  document.querySelectorAll('a[href^="#"]').forEach((a) => {
+    a.addEventListener("click", (e) => {
+      const id = a.getAttribute("href");
+      if (id.length > 1) {
+        const t = document.querySelector(id);
+        if (t) {
+          e.preventDefault();
+          t.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }
+    });
+  });
+</script>
+</body>
+</html>
