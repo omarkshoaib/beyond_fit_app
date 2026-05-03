@@ -9,6 +9,7 @@ from sqlmodel import Session, select
 
 from app.auth.deps import get_current_user, get_db
 from app.models import ClientProfile, CoachInvite
+from app.services.audit import log_audit
 from app.services.email_service import EmailService
 from app.settings import get_settings
 
@@ -152,6 +153,7 @@ def invite_coach(
         session.commit()
 
     EmailService.send_coach_invite(recipient_email=email, invited_by_name=user.name or "an admin")
+    log_audit(session, user, "coach.invite", target=email)
     return {"ok": True, "email": email}
 
 
@@ -207,6 +209,7 @@ def promote_admin(
     target.is_coach = True  # admins are also coaches by default
     session.add(target)
     session.commit()
+    log_audit(session, user, "admin.promote", target=target.email)
     return {"ok": True, "client_id": target.client_id, "email": target.email}
 
 
@@ -225,6 +228,7 @@ def demote_admin(
     target.is_admin = False
     session.add(target)
     session.commit()
+    log_audit(session, user, "admin.demote", target=target.email)
     return {"ok": True, "client_id": target.client_id, "email": target.email}
 
 

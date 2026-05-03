@@ -176,6 +176,51 @@ def approve_plan(
     }
 
 
+class EditRequest(BaseModel):
+    feedback: str
+
+
+@router.post("/edit/{approval_uuid}")
+def edit_pending_plan(
+    approval_uuid: str,
+    body: EditRequest,
+    user: ClientProfile = Depends(get_current_user),
+    session: Session = Depends(get_db),
+):
+    """Mutate a pending plan via LLM edit, then leave it pending so coach can
+    re-review. Reuses FlashCommunicationService.apply_coach_edits which is the
+    same path the Telegram bot uses for admin edits."""
+    _require_coach(user)
+    pending = session.get(PendingApproval, approval_uuid)
+    if not pending:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    client = session.get(ClientProfile, pending.client_id)
+    if not client or client.coach_id != user.client_id:
+        raise HTTPException(status_code=403, detail="Not your client")
+
+    try:
+        from app.services.llm_service import FlashCommunicationService
+        llm = FlashCommunicationService()
+        edited_json = llm.apply_coach_edits(pending.workout_json, body.feedback)
+    except Exception as e:
+        logger.exception("Coach edit failed for %s", approval_uuid)
+        raise HTTPException(status_code=500, detail=f"LLM edit failed: {e}")
+
+    # Audit
+    edits = list(pending.edit_log or [])
+    edits.append({
+        "at": datetime.now(timezone.utc).isoformat(),
+        "by": user.client_id,
+        "action": "edit",
+        "feedback": body.feedback,
+    })
+    pending.workout_json = edited_json
+    pending.edit_log = edits
+    session.add(pending)
+    session.commit()
+    return {"ok": True}
+
+
 @router.post("/reject/{approval_uuid}")
 def reject_plan(
     approval_uuid: str,

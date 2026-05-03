@@ -5,9 +5,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'core/router.dart';
 import 'core/theme/app_theme.dart';
+import 'core/utils/units.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Units.load();
   runApp(const BeyondFitApp());
 }
 

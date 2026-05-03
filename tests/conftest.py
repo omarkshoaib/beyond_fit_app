@@ -3,6 +3,10 @@ Shared fixtures for bot integration tests.
 """
 from __future__ import annotations
 
+import os
+# Disable rate limiting before app imports anything (must precede FastAPI init)
+os.environ.setdefault("DISABLE_RATELIMIT", "true")
+
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 

@@ -227,6 +227,54 @@ def test_resend_verification_noop_if_verified(client, registered_user):
     assert r.status_code == 200
 
 
+def test_healthz_returns_status(client):
+    resp = client.get("/healthz")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] in ("ok", "degraded")
+    assert "db" in body
+    assert "version" in body
+
+
+def test_export_my_data_returns_full_dump(client, auth_headers, registered_user):
+    resp = client.get("/api/v1/profile/export", headers=auth_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["profile"]["email"] == "test@beyondfit.com"
+    assert "workout_history" in body
+    assert "set_logs" in body
+    assert "audit_events" in body
+
+
+def test_log_set_persists(client, auth_headers):
+    """Per-set logger persists actual reps + weight + RPE. Doesn't need a real
+    plan — just stores the row keyed by history_id."""
+    resp = client.post("/api/v1/sets", headers=auth_headers, json={
+        "history_id": 999,  # synthetic — endpoint doesn't verify it exists
+        "day_index": 0,
+        "slot_index": 0,
+        "set_index": 0,
+        "actual_reps": 5,
+        "actual_weight": 80.0,
+        "rpe": 7,
+    })
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["ok"] is True
+
+    listing = client.get("/api/v1/sets/by-history/999", headers=auth_headers)
+    assert listing.status_code == 200
+    rows = listing.json()
+    assert len(rows) >= 1
+    assert rows[0]["actual_reps"] == 5
+    assert rows[0]["actual_weight"] == 80.0
+
+
+def test_feedback_submission(client, auth_headers):
+    resp = client.post("/api/v1/feedback", headers=auth_headers,
+                      json={"message": "test feedback", "app_version": "test-1.0"})
+    assert resp.status_code == 200
+
+
 def test_super_admin_self_heal_on_lifespan(test_engine):
     """Super-admin row should be auto-promoted at lifespan startup."""
     from app.main import _ensure_super_admin

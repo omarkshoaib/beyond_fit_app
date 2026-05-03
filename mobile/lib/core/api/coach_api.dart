@@ -30,6 +30,10 @@ class CoachApi {
   static Future<void> reject(String approvalUuid, String feedback) async {
     await _dio.post('/coach/reject/$approvalUuid', data: {'feedback': feedback});
   }
+
+  static Future<void> editPlan(String approvalUuid, String feedback) async {
+    await _dio.post('/coach/edit/$approvalUuid', data: {'feedback': feedback});
+  }
 }
 
 class AdminApi {

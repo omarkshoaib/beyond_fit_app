@@ -66,47 +66,73 @@ Wait ~30 seconds for the first build. Chrome will open with the app.
 
 ---
 
-## Coach + admin flow (full HITL approval)
+## Roles, super-admin, invite-only coaches
 
-The original Telegram-based admin flow is now fully on mobile too. Two new roles:
+Three roles with strict invariants:
 
-- **Coach** — reviews + approves clients' plans before they go active.
-- **Admin** — promotes coaches and assigns clients to coaches.
+- **Super-admin** — hardcoded as `omarkshoaib@outlook.com` in `app/settings.py`. Cannot be demoted. Only role that can promote other admins. Auto-healed on every server boot (if the row exists, `is_admin` and `is_coach` are forced to True).
+- **Admin** — appointed by the super-admin. Can invite coaches, withdraw invites, assign clients to coaches.
+- **Coach** — cannot self-register. An admin must `Invite coach` with their email *first*; when that email registers via the regular `/register` flow, they're flagged `is_coach=True` automatically.
+- **Client** — public self-registration. No admin involvement.
 
-### One-time setup: bootstrap your first admin
+### Bootstrap (first time)
 
-After you've registered an account in the app, promote it from the command line (admins can only be created by another admin, so the first one needs the bootstrap script):
+1. Register `omarkshoaib@outlook.com` in the app (Sign up).
+2. Restart the backend — lifespan auto-promotes that row to `is_admin=True, is_coach=True`. (Or run `python scripts/promote_admin.py omarkshoaib@outlook.com` once.)
+3. Sign in. App routes you to the Coach Dashboard.
 
-```bash
-cd /media/shoaib/NewVolume/beyond_fit_app
-DATABASE_URL=sqlite:///./beyond_fit.db python scripts/promote_admin.py you@example.com
-```
+### Super-admin → promote another admin
 
-That account is now admin + coach. Sign out and sign in again — the app will route you to the Coach dashboard.
+1. Profile → Admin Panel → **Admins** tab (only visible to super-admin).
+2. Tap "Promote admin" → enter the email of an already-registered user.
+3. They now see the Admins tab too on next sign-in. Demote with the red icon (super-admin row is protected).
 
-### Admin: promote coaches and assign clients
+### Admin → invite a coach
 
-1. Profile → **Admin Panel** (purple icon, admins only).
-2. Tap **Promote Coach** → enter their email → optionally tick "Also grant admin".
-3. Tap **Assign Client** → enter client email + coach email.
+1. Profile → Admin Panel → **Coaches** tab → "Invite coach" → enter email.
+2. The invitee receives an email (if SMTP is set up) and registers normally.
+3. On registration, their account is flagged `is_coach=True` automatically and the invite is marked accepted.
 
-You'll see all users with COACH / ADMIN / ASSIGNED pills.
+### Admin → assign a client to a coach
 
-### Coach: review + approve plans
+Profile → Admin Panel → **Clients** tab → "Assign client" → client email + coach email.
 
-1. Sign in as a coach → automatically routed to **Coach Dashboard**.
-2. **Awaiting your review** section lists pending plans (with orange badge counts on client tiles).
-3. Tap a pending card → see full week (every day, every exercise, sets × reps × weight × RPE).
-4. **Approve** (green) → plan becomes the client's active plan.
-5. **Reject** (red) → bottom sheet for feedback message → logged to the plan's edit history; client must regenerate.
+### Client (with an assigned coach)
 
-### Client (with assigned coach)
+Generates a plan → home shows **"Plan under review"**. Coach approves → home flips to today's session card. Coach rejects → home shows the feedback as an amber card with "Generate New Plan" CTA.
 
-When a client with a coach generates a plan, the home screen shows:
+### Coach edit-via-LLM (new)
 
-> **Plan under review** — Your coach is reviewing your plan. You will see it here as soon as it is approved.
+In the coach review screen, tap **"Edit plan via LLM before approving"** → bottom sheet → describe the change → backend calls `FlashCommunicationService.apply_coach_edits()` (same path Telegram uses) → re-loads the mutated plan for re-review.
 
-Once approved, the home screen flips to the regular Today's Session card. No coach assigned? Plans go straight to active (no approval needed) — useful for solo users.
+---
+
+## Workout flow with set logger
+
+Today's session card → tap each exercise → "Set 1 / Set 2 / Set 3" chips along the bottom of each slot card.
+
+Tap a chip → bottom sheet → enter actual reps + weight (in your unit, kg or lb — switch in Profile) + optional RPE → Save. Chip flips to a green check.
+
+The autoregulator reads these `SetLog` rows on the next check-in to adjust loads.
+
+---
+
+## Privacy: export + delete
+
+- **Export** — `GET /api/v1/profile/export` (Bearer auth) returns a JSON dump of every row associated with you. Wire to a "Download my data" button later, or `curl` it directly.
+- **Delete** — `DELETE /api/v1/profile` anonymises your row (clears email, name, password hash, role flags). Workout history rows stay for aggregate analytics. Super-admin can't delete themselves.
+
+---
+
+## Operations
+
+- **Health check**: `GET /healthz` → `{status, db, smtp, llm, telegram_bot, sentry, version}`.
+- **Rate limiting**: 10 requests / minute / IP on `/auth/login|register|forgot|reset`. Disable in tests / dev with `DISABLE_RATELIMIT=true`.
+- **Sentry**: set `SENTRY_DSN` to enable error reporting (server-side). No-op when unset.
+- **Structured logging**: `STRUCTLOG_JSON=true` switches to JSON output for log aggregators.
+- **Audit log**: every admin action (promote, demote, invite coach) writes an `AuditEvent` row. Inspect with `sqlite3 beyond_fit.db "SELECT * FROM auditevent ORDER BY id DESC LIMIT 20"`.
+- **Backups**: `./scripts/backup_db.sh ./backups` snapshots SQLite or runs `pg_dump` based on `DATABASE_URL`.
+- **Diagnostic auth**: `GET /api/v1/auth/whoami` returns roles + which auth source (Bearer vs cookie) the server saw. Use this when a 403 is mysterious.
 
 ---
 

@@ -76,6 +76,42 @@ class PendingApproval(SQLModel, table=True):
     cancelled_at: Optional[datetime] = Field(default=None)
 
 
+class AuditEvent(SQLModel, table=True):
+    """Append-only log of admin / coach actions for forensics."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    actor_id: Optional[str] = Field(default=None, index=True)
+    actor_email: Optional[str] = None
+    action: str = Field(index=True)  # e.g. "admin.promote", "coach.approve"
+    target: Optional[str] = None  # email / uuid the action applied to
+    payload: Optional[Dict] = Field(default=None, sa_column=Column(JSON))
+    created_at: Optional[datetime] = Field(default=None)
+
+
+class SetLog(SQLModel, table=True):
+    """Per-set log of actual reps + weight. Logged in real time during a workout
+    so the autoregulator can read it on the next check-in."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    client_id: str = Field(index=True)
+    history_id: int = Field(index=True)  # WorkoutHistory.history_id
+    day_index: int
+    slot_index: int
+    set_index: int
+    actual_reps: int
+    actual_weight: float
+    rpe: Optional[int] = None
+    logged_at: Optional[datetime] = Field(default=None)
+
+
+class Feedback(SQLModel, table=True):
+    """In-app feedback / bug reports submitted from the Profile screen."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    client_id: Optional[str] = Field(default=None, index=True)
+    email: Optional[str] = None
+    message: str
+    app_version: Optional[str] = None
+    created_at: Optional[datetime] = Field(default=None)
+
+
 class CoachInvite(SQLModel, table=True):
     """Pre-registered coach emails. When the email signs up via /auth/register,
     they're flagged is_coach=True automatically. accepted_at gets stamped at

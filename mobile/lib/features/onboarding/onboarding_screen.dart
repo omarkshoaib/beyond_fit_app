@@ -45,6 +45,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
   }
 
+  // Visible-on-step-> 0 back button is wired through the StepHeader.
+
   Future<void> _submit() async {
     setState(() {
       _submitting = true;

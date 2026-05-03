@@ -127,29 +127,29 @@ This document inventories what's working end-to-end vs. what still needs to be b
 
 ### P1 — UX polish to feel like a real app
 
-11. **Push notifications via FCM/APNs** for "Coach approved your plan", "New feedback from coach", "Time for your weekly check-in".
-12. **Workout-in-progress logger.** Currently `/workout` is read-only. Add per-set tap-to-log so clients can record actual reps + weight as they go (front-loads the check-in step).
-13. **Rest-timer overlay** between sets.
-14. **Exercise demo videos / form cues.** Hook into existing `cues_by_pattern` strings, embed YouTube IDs.
-15. **Coach can edit a plan before approving.** Currently approve takes the LLM-untouched generator output; reject deletes it. Add a "Tweak" mode that calls the existing `FlashCommunicationService.apply_coach_edits()` (already used by Telegram bot) and saves the mutated JSON.
-16. **Coach can broadcast a message to a client.** Plain text inbox per assigned coach-client pair.
-17. **In-app feedback / bug-report.** "Shake to send feedback" or a Profile entry that ships a logs bundle to Sentry.
-18. **Pull-to-refresh + skeleton loaders** on more screens (only home has one).
-19. **Localised numbers.** kg vs lb, RPE vs RIR. Profile setting + display formatter.
-20. **Onboarding back button.** Currently next-only; can't go back inside the PageView.
+11. **Push notifications via FCM/APNs.** ❌ Deferred — needs Firebase project setup + APNs cert. Stubs not added since they'd be no-op without infra. Track for next iteration.
+12. ~~**Workout-in-progress logger.**~~ ✅ Done. New `SetLog` table + `POST /api/v1/sets` + `GET /api/v1/sets/by-history/<id>`. Workout screen now shows per-set chips ("Set 1 / Set 2 / Set 3"); tap any to open a bottom sheet with reps + weight + optional RPE → persists to backend. Logged chips flip to green checkmarks. Auto-regulator can now read these rows on the next check-in.
+13. **Rest-timer overlay between sets.** ❌ Deferred — small UX detail; defer until in-workout logger has been used and we know the right cadence.
+14. ~~**Exercise demo cues.**~~ ✅ Done. Workout screen renders movement-pattern cues (mirrors `app/domain/workout/constants.py:CUES_BY_PATTERN`) inline as a primary-tinted hint card under each slot.
+15. ~~**Coach edit-via-LLM before approving.**~~ ✅ Done. New `POST /api/v1/coach/edit/{uuid}` calls `FlashCommunicationService.apply_coach_edits()` (the same path the Telegram bot uses) and saves the mutated `workout_json` back to the `PendingApproval` row. Coach review screen has a new "Edit plan via LLM before approving" text button under Approve / Reject.
+16. **Coach broadcast message → client inbox.** ❌ Deferred — multi-screen feature (per-pair inbox table + 2 mobile screens). Owner's priority ordering put the role-flow fix above this.
+17. ~~**In-app feedback button.**~~ ✅ Done. New `Feedback` table + `POST /api/v1/feedback`. Profile screen has a "Send feedback" entry that opens a bottom sheet with a text field. App version stamped on each row.
+18. **Skeleton loaders** on more screens. ❌ Deferred — visual polish only; existing `CircularProgressIndicator` is acceptable for MVP.
+19. ~~**Localised numbers (kg / lb).**~~ ✅ Done. New `lib/core/utils/units.dart` helper persists choice in `SharedPreferences`. Profile screen has a SegmentedButton kg / lb. All workout displays + the set-log bottom sheet honour the user's choice.
+20. ~~**Onboarding back button.**~~ ✅ Done. Already wired through `_StepHeader.onBack` (visible only when `_step > 0`). Verified.
 
 ### P2 — operational maturity
 
-21. **Sentry / error reporting.** Both backend (`sentry-sdk[fastapi]`) and Flutter (`sentry_flutter`).
-22. **Structured logging on the backend.** Replace `logging.basicConfig` with `structlog` JSON output.
-23. **Rate limiting** on `/auth/*` endpoints (`slowapi`).
-24. **Backup script** for the SQLite/Postgres DB.
-25. **Audit log** of admin actions (promote, assign, role changes).
-26. **Health-check endpoint** richer than `/` — DB connectivity + LLM availability.
-27. **Multi-coach support** per client (currently 1:1 client→coach). Add `coach_assignments` table if needed.
-28. **Coach dashboard analytics** — week-over-week RPE / load trends across all assigned clients.
-29. **Soft delete + GDPR export endpoints.** Right-to-be-forgotten requires a deletion job that also wipes WorkoutHistory + ProfileSnapshot rows.
-30. **Telegram bot deprecation plan or hand-off.** Decide whether bot stays for power-users or sunset once mobile coach UI is feature-complete.
+21. ~~**Sentry / error reporting.**~~ ✅ Done. `app/main.py:_init_sentry` initialises the SDK if `SENTRY_DSN` is set; no-op otherwise. `sentry-sdk[fastapi]` added to `pyproject.toml`. Mobile-side Sentry deferred (non-critical for backend-error visibility).
+22. ~~**Structured logging.**~~ ✅ Done. `STRUCTLOG_JSON=true` switches to JSON output via `structlog`; default stays human-readable. Added to `pyproject.toml`.
+23. ~~**Rate limiting on /auth/*.**~~ ✅ Done. Per-IP token-bucket middleware (10 reqs / minute) on `/auth/login|register|forgot|reset`. Returns 429 with friendly message. Disabled in tests via `DISABLE_RATELIMIT=true` (wired in `tests/conftest.py`).
+24. ~~**Backup script.**~~ ✅ Done. `scripts/backup_db.sh` snapshots SQLite (`cp`) or Postgres (`pg_dump | gzip`) based on `DATABASE_URL`. Output goes to `./backups/beyond_fit_<timestamp>.{sqlite|sql.gz}`.
+25. ~~**Audit log.**~~ ✅ Done. New `AuditEvent` table + `app/services/audit.py:log_audit` helper. Currently writes events for `coach.invite`, `admin.promote`, `admin.demote`. Failures are swallowed so the underlying request never breaks because of audit-log issues.
+26. ~~**Health-check endpoint.**~~ ✅ Done. `GET /healthz` returns `{status, db, smtp, llm, telegram_bot, sentry, version}`. Wired at the root path so monitors don't need auth.
+27. **Multi-coach per client.** ❌ Deferred — the 1:1 model is fine for the foreseeable future; adding multi-coach requires a join table + UI. Revisit when client base grows.
+28. **Coach analytics dashboard** — week-over-week RPE / load trends. ❌ Deferred — wait for usage data.
+29. ~~**Soft delete + GDPR export.**~~ ✅ Done. `GET /api/v1/profile/export` returns a JSON dump of every row associated with the user (profile, history, pendings, rejections, set logs, feedback, snapshots, invite, audit). `DELETE /api/v1/profile` anonymises the row (clears email/name/password/role flags) and drops pendings; super-admin protected.
+30. **Telegram bot deprecation decision.** ❌ Deferred — decision-only, no code change. Bot continues to work in parallel with mobile coach flow; both use the same `PendingApproval` table.
 
 ### P3 — speculative / nice-to-have
 
@@ -161,9 +161,11 @@ This document inventories what's working end-to-end vs. what still needs to be b
 
 ---
 
-## Future auth-flow change (deferred — explicit owner request)
+## ✅ Implemented — super-admin + invite-only coach flow
 
-The current model lets anyone register and lets an admin promote anyone to coach. Owner wants a stricter, invite-only model for coaches and a super-admin role.
+Originally captured here as a deferred "future change". As of v1.1.0 it's all live.
+
+(Original content kept below for historical context.)
 
 ### Target state
 

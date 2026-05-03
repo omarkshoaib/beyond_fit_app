@@ -1,12 +1,57 @@
 import logging
+import os
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlmodel import Session, create_engine, select, SQLModel
 
 logger = logging.getLogger(__name__)
+
+
+def _init_sentry() -> None:
+    """Initialise Sentry if SENTRY_DSN is set. No-op locally."""
+    dsn = os.getenv("SENTRY_DSN")
+    if not dsn:
+        return
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        sentry_sdk.init(
+            dsn=dsn,
+            integrations=[FastApiIntegration()],
+            traces_sample_rate=float(os.getenv("SENTRY_TRACES_RATE", "0.1")),
+            environment=os.getenv("SENTRY_ENV", "production"),
+        )
+    except Exception as e:
+        logger.warning(f"Sentry init failed: {e}")
+
+
+def _init_structlog() -> None:
+    """JSON structured logging when STRUCTLOG_JSON=true. Otherwise stdlib."""
+    if os.getenv("STRUCTLOG_JSON", "").lower() != "true":
+        logging.basicConfig(level=logging.INFO, stream=sys.stdout,
+                            format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+        return
+    try:
+        import structlog
+        structlog.configure(
+            processors=[
+                structlog.processors.add_log_level,
+                structlog.processors.TimeStamper(fmt="iso"),
+                structlog.processors.JSONRenderer(),
+            ],
+        )
+        logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
+    except Exception as e:
+        logger.warning(f"structlog init failed: {e}")
+
+
+_init_sentry()
+_init_structlog()
 
 from app.settings import get_settings
 from app.container import Container
@@ -19,6 +64,9 @@ from app.api.progress import router as progress_router
 from app.api.nutrition import router as nutrition_router
 from app.api.coach import router as coach_router
 from app.api.admin import router as admin_router
+from app.api.sets import router as sets_router
+from app.api.feedback import router as feedback_router
+from app.api.health import router as health_router
 
 
 def _make_engine(database_url: str):
@@ -133,6 +181,45 @@ async def lifespan(app: FastAPI):
     yield
 
 
+def _install_rate_limiter(app: FastAPI) -> None:
+    """Per-IP rate limiting on auth endpoints. slowapi is optional — if not
+    installed, we skip without crashing. Disabled when DISABLE_RATELIMIT=true
+    (test fixtures + dev rapid-iterating)."""
+    if os.getenv("DISABLE_RATELIMIT", "").lower() == "true":
+        return
+    try:
+        from slowapi import Limiter, _rate_limit_exceeded_handler
+        from slowapi.util import get_remote_address
+        from slowapi.errors import RateLimitExceeded
+        limiter = Limiter(key_func=get_remote_address, default_limits=[])
+        app.state.limiter = limiter
+        app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+        # Wrap relevant routes after include_router via a middleware that
+        # checks per-IP counts on /auth/* paths.
+        @app.middleware("http")
+        async def _ratelimit_auth_paths(request: Request, call_next):
+            path = request.url.path
+            if path in ("/api/v1/auth/login", "/api/v1/auth/register",
+                        "/api/v1/auth/forgot", "/api/v1/auth/reset"):
+                key = get_remote_address(request) + ":" + path
+                # 10 hits / minute / IP / endpoint
+                cache = app.state.__dict__.setdefault("_rl_cache", {})
+                import time
+                now = time.time()
+                bucket = cache.setdefault(key, [])
+                bucket[:] = [t for t in bucket if now - t < 60]
+                if len(bucket) >= 10:
+                    return JSONResponse(
+                        status_code=429,
+                        content={"detail": "Too many requests. Try again in a minute."},
+                    )
+                bucket.append(now)
+            return await call_next(request)
+    except ImportError:
+        logger.info("slowapi not installed — rate limiting disabled")
+
+
 def get_app() -> FastAPI:
     app = FastAPI(title="Deterministic Coaching Engine", lifespan=lifespan)
 
@@ -162,6 +249,11 @@ def get_app() -> FastAPI:
     app.include_router(nutrition_router, prefix="/api/v1")
     app.include_router(coach_router, prefix="/api/v1")
     app.include_router(admin_router, prefix="/api/v1")
+    app.include_router(sets_router, prefix="/api/v1")
+    app.include_router(feedback_router, prefix="/api/v1")
+    app.include_router(health_router)  # /healthz at root for ops monitors
+
+    _install_rate_limiter(app)
     return app
 
 

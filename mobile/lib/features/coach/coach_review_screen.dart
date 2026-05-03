@@ -49,6 +49,86 @@ class _CoachReviewScreenState extends State<CoachReviewScreen> {
     }
   }
 
+  Future<void> _showEditSheet() async {
+    final ctrl = TextEditingController();
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(
+          left: 20, right: 20, top: 20,
+          bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Edit the plan via LLM',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            const Text(
+                'Describe the changes you want. The deterministic engine wrote '
+                'the plan; the LLM will mutate it per your direction. You will '
+                're-approve afterwards.',
+                style: TextStyle(color: Colors.grey, fontSize: 13)),
+            const SizedBox(height: 16),
+            TextField(
+              controller: ctrl,
+              maxLines: 4,
+              autofocus: true,
+              decoration: const InputDecoration(
+                hintText: 'e.g. Drop the deadlift on day 3 and add Romanian deadlifts.',
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Padding(padding: EdgeInsets.all(12), child: Text('Cancel')),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: () {
+                      if (ctrl.text.trim().isEmpty) return;
+                      Navigator.pop(ctx, ctrl.text.trim());
+                    },
+                    child: const Padding(padding: EdgeInsets.all(12), child: Text('Apply edit')),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+    if (result != null && result.isNotEmpty) {
+      setState(() => _busy = true);
+      try {
+        await CoachApi.editPlan(widget.approvalUuid, result);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Plan updated — review again')));
+          await _load();
+          if (mounted) setState(() => _busy = false);
+        }
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Edit failed')));
+          setState(() => _busy = false);
+        }
+      }
+    }
+  }
+
   Future<void> _showRejectSheet() async {
     final ctrl = TextEditingController();
     final result = await showModalBottomSheet<String>(
@@ -198,36 +278,46 @@ class _CoachReviewScreenState extends State<CoachReviewScreen> {
                     SafeArea(
                       child: Padding(
                         padding: const EdgeInsets.all(16),
-                        child: Row(
+                        child: Column(
                           children: [
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                style: OutlinedButton.styleFrom(
-                                  minimumSize: const Size.fromHeight(54),
-                                  side: BorderSide(color: Colors.red.shade700),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    style: OutlinedButton.styleFrom(
+                                      minimumSize: const Size.fromHeight(54),
+                                      side: BorderSide(color: Colors.red.shade700),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                    ),
+                                    onPressed: _busy ? null : _showRejectSheet,
+                                    icon: Icon(Icons.close, color: Colors.red.shade400),
+                                    label: Text('Reject', style: TextStyle(color: Colors.red.shade400)),
+                                  ),
                                 ),
-                                onPressed: _busy ? null : _showRejectSheet,
-                                icon: Icon(Icons.close, color: Colors.red.shade400),
-                                label: Text('Reject', style: TextStyle(color: Colors.red.shade400)),
-                              ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: FilledButton.icon(
+                                    style: FilledButton.styleFrom(
+                                      minimumSize: const Size.fromHeight(54),
+                                      backgroundColor: Colors.green.shade700,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                    ),
+                                    onPressed: _busy ? null : _approve,
+                                    icon: _busy
+                                        ? const SizedBox(
+                                            height: 18, width: 18,
+                                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                        : const Icon(Icons.check),
+                                    label: const Text('Approve', style: TextStyle(fontWeight: FontWeight.w600)),
+                                  ),
+                                ),
+                              ],
                             ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: FilledButton.icon(
-                                style: FilledButton.styleFrom(
-                                  minimumSize: const Size.fromHeight(54),
-                                  backgroundColor: Colors.green.shade700,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                                ),
-                                onPressed: _busy ? null : _approve,
-                                icon: _busy
-                                    ? const SizedBox(
-                                        height: 18, width: 18,
-                                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                                    : const Icon(Icons.check),
-                                label: const Text('Approve', style: TextStyle(fontWeight: FontWeight.w600)),
-                              ),
+                            const SizedBox(height: 8),
+                            TextButton.icon(
+                              onPressed: _busy ? null : _showEditSheet,
+                              icon: const Icon(Icons.edit_note, size: 20),
+                              label: const Text('Edit plan via LLM before approving'),
                             ),
                           ],
                         ),

@@ -3,7 +3,9 @@ import 'package:go_router/go_router.dart';
 import '../../core/api/auth_api.dart';
 import '../../core/api/plans_api.dart';
 import '../../core/api/profile_api.dart';
+import '../../core/api/sets_api.dart';
 import '../../core/models/models.dart';
+import '../../core/utils/units.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -34,6 +36,72 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _logout() async {
     await AuthApi.logout();
     if (mounted) context.go('/login');
+  }
+
+  Future<void> _showFeedbackSheet(BuildContext context) async {
+    final ctrl = TextEditingController();
+    bool sending = false;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setLocal) {
+        return Padding(
+          padding: EdgeInsets.only(
+              left: 20, right: 20, top: 20,
+              bottom: MediaQuery.of(ctx).viewInsets.bottom + 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Send feedback',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              TextField(
+                controller: ctrl,
+                maxLines: 5,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: 'What is broken / annoying / awesome?',
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton(
+                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                onPressed: sending
+                    ? null
+                    : () async {
+                        if (ctrl.text.trim().isEmpty) return;
+                        setLocal(() => sending = true);
+                        try {
+                          await FeedbackApi.submit(message: ctrl.text.trim(), appVersion: 'mobile-1.1');
+                          if (ctx.mounted) {
+                            ScaffoldMessenger.of(ctx).showSnackBar(
+                              const SnackBar(content: Text('Thanks — got it.')));
+                            Navigator.pop(ctx);
+                          }
+                        } catch (_) {
+                          if (ctx.mounted) {
+                            ScaffoldMessenger.of(ctx).showSnackBar(
+                              const SnackBar(content: Text('Could not send feedback')));
+                            setLocal(() => sending = false);
+                          }
+                        }
+                      },
+                child: sending
+                    ? const SizedBox(
+                        height: 20, width: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Text('Send'),
+              ),
+            ],
+          ),
+        );
+      }),
+    );
   }
 
   @override
@@ -114,6 +182,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           onTap: () => context.go('/admin'),
                         ),
                       ),
+                    Card(
+                      child: ListTile(
+                        leading: const Icon(Icons.straighten),
+                        title: const Text('Weight units'),
+                        trailing: SegmentedButton<String>(
+                          segments: const [
+                            ButtonSegment(value: 'kg', label: Text('kg')),
+                            ButtonSegment(value: 'lb', label: Text('lb')),
+                          ],
+                          selected: {Units.current},
+                          onSelectionChanged: (s) async {
+                            await Units.setUnit(s.first);
+                            if (mounted) setState(() {});
+                          },
+                        ),
+                      ),
+                    ),
+                    Card(
+                      child: ListTile(
+                        leading: const Icon(Icons.feedback_outlined),
+                        title: const Text('Send feedback'),
+                        subtitle: const Text('Bug reports, ideas, complaints — we read them all'),
+                        trailing: const Icon(Icons.arrow_forward_ios, size: 14),
+                        onTap: () => _showFeedbackSheet(context),
+                      ),
+                    ),
                   ],
                 ),
     );
