@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
+
 import '../../core/api/auth_api.dart';
 import '../../core/api/plans_api.dart';
 import '../../core/models/models.dart';
+import '../../core/theme/app_theme.dart';
+import '../../core/widgets/editorial.dart';
 import '../../core/widgets/friendly_error.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -55,7 +59,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       await PlansApi.generate();
       await _load();
-    } catch (e) {
+    } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not generate plan. Try again.')),
@@ -67,52 +71,35 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String _greeting() {
     final hour = DateTime.now().hour;
-    if (hour < 12) return 'Good morning';
-    if (hour < 18) return 'Good afternoon';
-    return 'Good evening';
+    if (hour < 12) return 'Good morning,';
+    if (hour < 18) return 'Good afternoon,';
+    return 'Good evening,';
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final name = _profile?.name?.split(' ').first ?? 'Athlete';
 
     return Scaffold(
-      appBar: AppBar(
-        toolbarHeight: 72,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              _greeting(),
-              style: TextStyle(fontSize: 13, color: Colors.grey.shade400, fontWeight: FontWeight.w400),
-            ),
-            Text(name, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-          ],
-        ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: GestureDetector(
-              onTap: () => context.go('/profile'),
-              child: CircleAvatar(
-                radius: 18,
-                backgroundColor: theme.colorScheme.primary,
-                child: Text(
-                  name.substring(0, 1).toUpperCase(),
-                  style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
-                ),
-              ),
+      body: Stack(
+        children: [
+          const PaperGrain(opacity: 0.04),
+          Positioned(top: 0, left: 0, right: 0, child: Container(height: 4, color: BFColors.signal)),
+          SafeArea(
+            child: Column(
+              children: [
+                _Topbar(name: name, onProfileTap: () => context.go('/profile')),
+                Expanded(child: _buildBody(name)),
+              ],
             ),
           ),
         ],
       ),
-      body: _buildBody(),
     );
   }
 
-  Widget _buildBody() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+  Widget _buildBody(String name) {
+    if (_loading) return const Center(child: CircularProgressIndicator(strokeWidth: 1.4));
 
     if (_error != null) {
       return FriendlyState(
@@ -131,7 +118,7 @@ class _HomeScreenState extends State<HomeScreen> {
         message: 'Your coach is reviewing your plan. You will see it here as soon as it is approved.',
         actionLabel: 'Refresh',
         onAction: _load,
-        iconColor: Colors.orange,
+        iconColor: BFColors.signalSoft,
       );
     }
 
@@ -143,7 +130,7 @@ class _HomeScreenState extends State<HomeScreen> {
             '"${_today!.rejectionFeedback}"\n\nGenerate a new plan to apply your coach\'s feedback.',
         actionLabel: _generating ? 'Generating…' : 'Generate New Plan',
         onAction: _generating ? null : _generateFirstPlan,
-        iconColor: Colors.amber,
+        iconColor: BFColors.signalSoft,
       );
     }
 
@@ -159,22 +146,160 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return RefreshIndicator(
       onRefresh: _load,
+      color: BFColors.signal,
+      backgroundColor: BFColors.inkSoft,
       child: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
         children: [
           if (_profile != null && !_profile!.isVerified) ...[
             _UnverifiedBanner(email: _profile!.email),
-            const SizedBox(height: 12),
+            const SizedBox(height: 18),
           ],
-          _WeekBadge(weekNumber: _profile?.weekNumber ?? 1),
-          const SizedBox(height: 20),
+
+          // Greeting block — Fraunces displayMedium with italic name
+          Text(_greeting(),
+              style: GoogleFonts.crimsonPro(
+                fontSize: 16, fontStyle: FontStyle.italic,
+                color: BFColors.creamMute,
+              )),
+          const SizedBox(height: 4),
+          Text.rich(
+            TextSpan(children: [
+              TextSpan(text: '$name.', style: Theme.of(context).textTheme.displayMedium),
+            ]),
+          ),
+          const SizedBox(height: 24),
+
+          // Week numeral + side meta row
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              NumeralStat(
+                value: '${_profile?.weekNumber ?? 1}',
+                label: 'Week',
+                size: 64,
+              ),
+              const SizedBox(width: 24),
+              Container(width: 1, height: 56, color: BFColors.inkRule),
+              const SizedBox(width: 24),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      (_profile?.experienceLevel ?? 'beginner').toUpperCase(),
+                      style: GoogleFonts.jetBrainsMono(
+                        fontSize: 10, color: BFColors.cream,
+                        fontWeight: FontWeight.w600, letterSpacing: 2,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${_profile?.trainingDays ?? 3} days/wk',
+                      style: GoogleFonts.crimsonPro(
+                        fontSize: 14, fontStyle: FontStyle.italic,
+                        color: BFColors.creamSoft,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 28),
+          const RuledLine(leadLabel: '§·02'),
+          const SizedBox(height: 14),
+          SectionLabel(number: '02', label: "Today's session"),
+          const SizedBox(height: 14),
           _TodayCard(session: _today!),
-          const SizedBox(height: 16),
+
+          const SizedBox(height: 28),
+          const RuledLine(leadLabel: '§·03'),
+          const SizedBox(height: 14),
+          SectionLabel(number: '03', label: 'Quick actions'),
+          const SizedBox(height: 14),
           const _QuickActions(),
         ],
       ),
     );
   }
+}
+
+class _Topbar extends StatelessWidget {
+  final String name;
+  final VoidCallback onProfileTap;
+  const _Topbar({required this.name, required this.onProfileTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      decoration: const Border(bottom: BorderSide(color: BFColors.inkRule)).toBoxDecoration(),
+      child: Row(
+        children: [
+          // Mini brand mark
+          Text(
+            'beyond',
+            style: GoogleFonts.fraunces(
+              fontSize: 18, color: BFColors.cream,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.6,
+            ),
+          ),
+          Text('&',
+              style: BFType.ital(size: 18, color: BFColors.signal, weight: FontWeight.w400)),
+          Text(
+            'fit',
+            style: GoogleFonts.fraunces(
+              fontSize: 18, color: BFColors.cream,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.6,
+            ),
+          ),
+          const Spacer(),
+          // Date stamp, monospace
+          Text(
+            _formatToday(),
+            style: GoogleFonts.jetBrainsMono(
+              fontSize: 10, color: BFColors.creamMute,
+              fontWeight: FontWeight.w500, letterSpacing: 1.6,
+            ),
+          ),
+          const SizedBox(width: 16),
+          GestureDetector(
+            onTap: onProfileTap,
+            child: Container(
+              width: 34, height: 34,
+              decoration: BoxDecoration(
+                border: Border.all(color: BFColors.signal, width: 1),
+                color: BFColors.inkSoft,
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                name.substring(0, 1).toUpperCase(),
+                style: GoogleFonts.fraunces(
+                  fontSize: 16, color: BFColors.cream,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatToday() {
+    final now = DateTime.now();
+    const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+    return '${now.day.toString().padLeft(2, '0')} ${months[now.month - 1]} ${now.year}';
+  }
+}
+
+extension _BorderBox on Border {
+  BoxDecoration toBoxDecoration() => BoxDecoration(border: this);
 }
 
 class _UnverifiedBanner extends StatefulWidget {
@@ -202,72 +327,36 @@ class _UnverifiedBannerState extends State<_UnverifiedBanner> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
       decoration: BoxDecoration(
-        color: Colors.amber.withValues(alpha: 0.13),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.amber.withValues(alpha: 0.4), width: 1),
+        color: BFColors.signalSoft.withValues(alpha: 0.10),
+        border: Border.all(color: BFColors.signalSoft.withValues(alpha: 0.45)),
       ),
       child: Row(
         children: [
-          const Icon(Icons.mark_email_unread_outlined, color: Colors.amber, size: 22),
+          const Icon(Icons.mark_email_unread_outlined,
+              color: BFColors.signalSoft, size: 20),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              _sent
-                  ? 'Verification email sent to ${widget.email}'
-                  : 'Verify your email to secure your account',
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+              _sent ? 'Verification sent to ${widget.email}' : 'Verify your email to secure your account',
+              style: GoogleFonts.crimsonPro(
+                fontSize: 14, color: BFColors.cream, fontWeight: FontWeight.w500,
+              ),
             ),
           ),
           if (!_sent)
             TextButton(
               onPressed: _sending ? null : _resend,
-              style: TextButton.styleFrom(foregroundColor: Colors.amber),
+              style: TextButton.styleFrom(foregroundColor: BFColors.signalSoft),
               child: _sending
                   ? const SizedBox(
-                      width: 16, height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.amber))
-                  : const Text('Resend'),
+                      width: 14, height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 1.4, color: BFColors.signalSoft))
+                  : const Text('RESEND'),
             ),
         ],
       ),
-    );
-  }
-}
-
-class _WeekBadge extends StatelessWidget {
-  final int weekNumber;
-  const _WeekBadge({required this.weekNumber});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.primary.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.calendar_today, size: 14, color: theme.colorScheme.primary),
-              const SizedBox(width: 6),
-              Text(
-                'Week $weekNumber',
-                style: TextStyle(
-                  color: theme.colorScheme.primary,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
     );
   }
 }
@@ -278,105 +367,102 @@ class _TodayCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     if (session.isRestDay) {
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(28),
-          child: Column(
-            children: [
-              Icon(Icons.hotel, size: 56, color: Colors.grey.shade500),
-              const SizedBox(height: 16),
-              Text('Rest Day', style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 6),
-              Text(
-                'Recovery is part of training.',
-                style: TextStyle(color: Colors.grey.shade400),
-              ),
-            ],
-          ),
+      return RuledCard(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          children: [
+            const Icon(Icons.hotel, size: 48, color: BFColors.creamSoft),
+            const SizedBox(height: 16),
+            Text('Rest Day', style: Theme.of(context).textTheme.headlineMedium),
+            const SizedBox(height: 8),
+            Text('Recovery is part of training.',
+                style: GoogleFonts.crimsonPro(
+                  fontSize: 15, fontStyle: FontStyle.italic,
+                  color: BFColors.creamSoft,
+                )),
+          ],
         ),
       );
     }
 
-    return Card(
-      child: InkWell(
-        onTap: () => GoRouter.of(context).go('/workout'),
-        borderRadius: BorderRadius.circular(16),
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return RuledCard(
+      onTap: () => GoRouter.of(context).go('/workout'),
+      padding: const EdgeInsets.fromLTRB(22, 22, 22, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    "TODAY'S SESSION",
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: Colors.grey.shade400,
-                      letterSpacing: 1.2,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey.shade500),
-                ],
-              ),
-              const SizedBox(height: 10),
               Text(
-                session.dayName,
-                style: theme.textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  _ChipInfo(icon: Icons.fitness_center, label: '${session.slots.length} exercises'),
-                  const SizedBox(width: 8),
-                  _ChipInfo(icon: Icons.schedule, label: '~60 min'),
-                ],
-              ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(50),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  ),
-                  onPressed: () => GoRouter.of(context).go('/workout'),
-                  icon: const Icon(Icons.play_arrow_rounded, size: 24),
-                  label: const Text('Start Workout', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                'TODAY · DAY ${session.dayIndex + 1} OF ${session.totalDays}',
+                style: GoogleFonts.jetBrainsMono(
+                  fontSize: 9, color: BFColors.creamMute,
+                  fontWeight: FontWeight.w500, letterSpacing: 1.8,
                 ),
               ),
+              const Spacer(),
+              const Icon(Icons.arrow_forward, size: 14, color: BFColors.creamMute),
             ],
           ),
-        ),
+          const SizedBox(height: 14),
+          // Day name in display Fraunces with italic mid-word
+          Text(
+            session.dayName,
+            style: GoogleFonts.fraunces(
+              fontSize: 38, height: 0.95, color: BFColors.cream,
+              fontWeight: FontWeight.w500,
+              letterSpacing: -1.0,
+            ),
+          ),
+          const SizedBox(height: 18),
+          // Stat row: exercise count + duration
+          Row(
+            children: [
+              _MiniStat(value: '${session.slots.length}', label: 'exercises'),
+              const SizedBox(width: 28),
+              _MiniStat(value: '~60', label: 'minutes'),
+            ],
+          ),
+          const SizedBox(height: 22),
+          EditorialPrimaryButton(
+            label: 'Start workout',
+            icon: Icons.play_arrow_rounded,
+            onPressed: () => GoRouter.of(context).go('/workout'),
+          ),
+        ],
       ),
     );
   }
 }
 
-class _ChipInfo extends StatelessWidget {
-  final IconData icon;
+class _MiniStat extends StatelessWidget {
+  final String value;
   final String label;
-  const _ChipInfo({required this.icon, required this.label});
+  const _MiniStat({required this.value, required this.label});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 13, color: Colors.grey.shade400),
-          const SizedBox(width: 5),
-          Text(label, style: TextStyle(fontSize: 12, color: Colors.grey.shade300)),
-        ],
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          value,
+          style: GoogleFonts.jetBrainsMono(
+            fontSize: 22, color: BFColors.cream,
+            fontWeight: FontWeight.w500, letterSpacing: -0.6,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          label.toUpperCase(),
+          style: GoogleFonts.jetBrainsMono(
+            fontSize: 9, color: BFColors.creamMute,
+            fontWeight: FontWeight.w500, letterSpacing: 1.6,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -386,52 +472,46 @@ class _QuickActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final actions = [
-      ('Progress', Icons.show_chart, '/progress', Colors.orange),
-      ('Check-in', Icons.check_circle_outline, '/checkin', Colors.green),
-      ('Full Plan', Icons.calendar_today, '/plan', Colors.blue),
-      ('Nutrition', Icons.restaurant_menu, '/nutrition', Colors.purple),
+    final items = [
+      ('Progress', '04', '/progress', Icons.show_chart),
+      ('Check-in', '05', '/checkin', Icons.check_circle_outline),
+      ('Plan', '06', '/plan', Icons.calendar_today),
+      ('Nutrition', '07', '/nutrition', Icons.restaurant_menu),
     ];
-
-    return GridView.count(
-      crossAxisCount: 2,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      crossAxisSpacing: 12,
-      mainAxisSpacing: 12,
-      childAspectRatio: 2.2,
-      children: actions.map((a) {
-        return Card(
-          child: InkWell(
-            onTap: () => context.go(a.$3),
-            borderRadius: BorderRadius.circular(16),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              child: Row(
-                children: [
-                  Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: a.$4.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(a.$2, size: 19, color: a.$4),
+    return Column(
+      children: items
+          .map((a) => Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: RuledCard(
+                  onTap: () => context.go(a.$3),
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+                  child: Row(
+                    children: [
+                      Text(
+                        a.$2,
+                        style: GoogleFonts.fraunces(
+                          fontSize: 22, color: BFColors.signal,
+                          fontWeight: FontWeight.w300,
+                          letterSpacing: -0.4,
+                        ),
+                      ),
+                      const SizedBox(width: 18),
+                      Text(
+                        a.$1,
+                        style: GoogleFonts.crimsonPro(
+                          fontSize: 18, color: BFColors.cream,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const Spacer(),
+                      Icon(a.$4, size: 18, color: BFColors.creamSoft),
+                      const SizedBox(width: 14),
+                      const Icon(Icons.arrow_forward, size: 14, color: BFColors.creamMute),
+                    ],
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      a.$1,
-                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      }).toList(),
+                ),
+              ))
+          .toList(),
     );
   }
 }

@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
-/// Friendly error / empty state card with icon, title, message, and optional retry button.
+import '../theme/app_theme.dart';
+import 'editorial.dart';
+
+/// Editorial empty/error/loading card.
+/// Style: ruled border, oversized Fraunces title, Crimson Pro body, mono CTA.
 class FriendlyState extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -21,50 +26,42 @@ class FriendlyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 88,
-              height: 88,
-              decoration: BoxDecoration(
-                color: (iconColor ?? theme.colorScheme.primary).withValues(alpha: 0.12),
-                shape: BoxShape.circle,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(28),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 460),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 76, height: 76,
+                decoration: BoxDecoration(
+                  border: Border.all(color: iconColor ?? BFColors.signal, width: 1),
+                ),
+                alignment: Alignment.center,
+                child: Icon(icon, size: 36, color: iconColor ?? BFColors.signal),
               ),
-              child: Icon(
-                icon,
-                size: 44,
-                color: iconColor ?? theme.colorScheme.primary,
-              ),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              title,
-              style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              message,
-              style: theme.textTheme.bodyMedium?.copyWith(color: Colors.grey),
-              textAlign: TextAlign.center,
-            ),
-            if (actionLabel != null && onAction != null) ...[
               const SizedBox(height: 24),
-              FilledButton(
-                onPressed: onAction,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
-                  child: Text(actionLabel!),
+              Text(title, style: Theme.of(context).textTheme.displaySmall),
+              const SizedBox(height: 14),
+              Text(
+                message,
+                style: GoogleFonts.crimsonPro(
+                  fontSize: 17, color: BFColors.creamSoft,
+                  height: 1.5, fontStyle: FontStyle.italic,
                 ),
               ),
+              if (actionLabel != null && onAction != null) ...[
+                const SizedBox(height: 28),
+                EditorialPrimaryButton(
+                  label: actionLabel!,
+                  onPressed: onAction,
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );

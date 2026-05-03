@@ -36,6 +36,9 @@ dependencies:
   # Deep links (universal links + custom scheme)
   app_links: ^6.3.2
 
+  # Type — Fraunces / Crimson Pro / JetBrains Mono via Google Fonts CDN
+  google_fonts: ^6.2.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
