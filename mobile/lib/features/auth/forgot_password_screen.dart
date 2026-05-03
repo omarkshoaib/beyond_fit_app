@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/theme/app_theme.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/api/auth_api.dart';
 
@@ -102,7 +103,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                             child: _loading
                                 ? const SizedBox(
                                     height: 22, width: 22,
-                                    child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white))
+                                    child: CircularProgressIndicator(strokeWidth: 2.4, color: BFColors.cream))
                                 : const Text('Send reset link',
                                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                           ),

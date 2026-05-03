@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/theme/app_theme.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/api/auth_api.dart';
 
@@ -52,7 +53,7 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
                       Icon(
                         _ok ? Icons.verified_outlined : Icons.error_outline,
                         size: 88,
-                        color: _ok ? Colors.green : theme.colorScheme.error,
+                        color: _ok ? BFColors.success : theme.colorScheme.error,
                       ),
                       const SizedBox(height: 24),
                       Text(

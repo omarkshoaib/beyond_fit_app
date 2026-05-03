@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/theme/app_theme.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/api/auth_api.dart';
 import '../../core/api/coach_api.dart';
@@ -98,13 +99,13 @@ class _CoachHomeScreenState extends State<CoachHomeScreen> {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                               decoration: BoxDecoration(
-                                color: Colors.orange.withValues(alpha: 0.18),
+                                color: BFColors.signal.withValues(alpha: 0.18),
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               child: Text(
                                 '${_pending.length} pending',
                                 style: const TextStyle(
-                                  color: Colors.orange,
+                                  color: BFColors.signal,
                                   fontWeight: FontWeight.bold,
                                   fontSize: 12,
                                 ),
@@ -157,8 +158,8 @@ class _PendingCard extends StatelessWidget {
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
       child: ListTile(
         leading: CircleAvatar(
-          backgroundColor: Colors.orange.withValues(alpha: 0.2),
-          child: const Icon(Icons.fact_check_outlined, color: Colors.orange, size: 20),
+          backgroundColor: BFColors.signal.withValues(alpha: 0.2),
+          child: const Icon(Icons.fact_check_outlined, color: BFColors.signal, size: 20),
         ),
         title: Text(approval.clientName, style: const TextStyle(fontWeight: FontWeight.bold)),
         subtitle: Text('Week ${approval.weekNumber} • ${approval.days.length} days',
@@ -182,7 +183,7 @@ class _ClientTile extends StatelessWidget {
       child: ListTile(
         leading: CircleAvatar(
           backgroundColor: Theme.of(context).colorScheme.primary,
-          child: Text(initials, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          child: Text(initials, style: const TextStyle(color: BFColors.cream, fontWeight: FontWeight.bold)),
         ),
         title: Text(client.name ?? 'Client',
             style: const TextStyle(fontWeight: FontWeight.w600)),
@@ -198,12 +199,12 @@ class _ClientTile extends StatelessWidget {
             ? Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: Colors.orange,
+                  color: BFColors.signal,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text('${client.pendingCount}',
                     style: const TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                        color: BFColors.cream, fontWeight: FontWeight.bold, fontSize: 12)),
               )
             : const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey),
       ),

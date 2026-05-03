@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/theme/app_theme.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/api/plans_api.dart';
 import '../../core/api/profile_api.dart';
@@ -131,7 +132,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       ? const SizedBox(
                           height: 22,
                           width: 22,
-                          child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white),
+                          child: CircularProgressIndicator(strokeWidth: 2.4, color: BFColors.cream),
                         )
                       : Text(
                           _step == _totalSteps - 1 ? 'Generate My Plan' : 'Continue',
@@ -254,7 +255,7 @@ class _AvatarStep extends StatelessWidget {
                         : Theme.of(ctx).colorScheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(14),
                   ),
-                  child: Icon(o.$4, color: isSelected ? Colors.white : Colors.grey, size: 28),
+                  child: Icon(o.$4, color: isSelected ? BFColors.cream : Colors.grey, size: 28),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
@@ -332,7 +333,7 @@ class _DaysStep extends StatelessWidget {
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 18,
-                          color: selected ? Colors.white : Colors.grey,
+                          color: selected ? BFColors.cream : Colors.grey,
                         ),
                       ),
                     ),

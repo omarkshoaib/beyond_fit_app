@@ -94,7 +94,7 @@ class _CheckinScreenState extends State<CheckinScreen> {
       final slots = _mainSlots.map((s) {
         final idx = s['_idx'] as int;
         return {
-          'exercise_name': (s['exercise'] as Map?)?['name'] ?? '',
+          'exercise_name': (s['exercise_name'] as String?) ?? '',
           'actual_weight': double.parse(_weightCtrl[idx]!.text),
           'actual_rpe': int.parse(_rpeCtrl[idx]!.text),
         };
@@ -136,10 +136,10 @@ class _CheckinScreenState extends State<CheckinScreen> {
                     const SizedBox(height: 24),
                     ..._mainSlots.asMap().entries.map((e) {
                       final idx = e.value['_idx'] as int;
-                      final name = (e.value['exercise'] as Map?)?['name'] ?? 'Exercise';
+                      final name = (e.value['exercise_name'] as String?) ?? 'Exercise';
                       final rpeRaw = e.value['rpe'];
                       return _LiftEntry(
-                        name: name as String,
+                        name: name,
                         targetWeight: e.value['target_weight'] as num?,
                         targetRpe: rpeRaw is num ? rpeRaw.toInt() : null,
                         weightCtrl: _weightCtrl[idx]!,

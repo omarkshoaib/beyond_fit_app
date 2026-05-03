@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/theme/app_theme.dart';
 import '../../core/api/auth_api.dart';
 import '../../core/api/coach_api.dart';
 import '../../core/models/models.dart';
@@ -173,11 +174,11 @@ class _CoachesTabState extends State<_CoachesTab> {
               const SizedBox(height: 8),
               ..._invites.map((inv) => Card(
                     child: ListTile(
-                      leading: const Icon(Icons.mail_outline, color: Colors.amber),
+                      leading: const Icon(Icons.mail_outline, color: BFColors.signalSoft),
                       title: Text(inv['email'] as String),
                       subtitle: const Text('Awaiting registration'),
                       trailing: IconButton(
-                        icon: const Icon(Icons.close, color: Colors.redAccent),
+                        icon: const Icon(Icons.close, color: BFColors.signal),
                         onPressed: () => _withdraw(inv['email'] as String),
                       ),
                     ),
@@ -199,15 +200,15 @@ class _CoachesTabState extends State<_CoachesTab> {
                       leading: CircleAvatar(
                         backgroundColor: Theme.of(context).colorScheme.primary,
                         child: Text(((c['name'] as String?) ?? (c['email'] as String)).substring(0, 1).toUpperCase(),
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                            style: const TextStyle(color: BFColors.cream, fontWeight: FontWeight.bold)),
                       ),
                       title: Text((c['name'] as String?) ?? 'Coach'),
                       subtitle: Text(c['email'] as String, style: const TextStyle(color: Colors.grey, fontSize: 12)),
                       trailing: Wrap(
                         spacing: 4,
                         children: [
-                          if (c['is_super_admin'] == true) _Pill(label: 'SUPER', color: Colors.deepPurple),
-                          if (c['is_admin'] == true && c['is_super_admin'] != true) _Pill(label: 'ADMIN', color: Colors.purple),
+                          if (c['is_super_admin'] == true) _Pill(label: 'SUPER', color: BFColors.signal),
+                          if (c['is_admin'] == true && c['is_super_admin'] != true) _Pill(label: 'ADMIN', color: BFColors.signal),
                         ],
                       ),
                     ),
@@ -332,10 +333,10 @@ class _ClientsTabState extends State<_ClientsTab> {
                 trailing: Wrap(
                   spacing: 4,
                   children: [
-                    if (c['is_super_admin'] == true) _Pill(label: 'SUPER', color: Colors.deepPurple),
-                    if (c['is_admin'] == true && c['is_super_admin'] != true) _Pill(label: 'ADMIN', color: Colors.purple),
-                    if (c['is_coach'] == true && c['is_admin'] != true) _Pill(label: 'COACH', color: Colors.blue),
-                    if (c['coach_id'] != null) _Pill(label: 'ASSIGNED', color: Colors.green),
+                    if (c['is_super_admin'] == true) _Pill(label: 'SUPER', color: BFColors.signal),
+                    if (c['is_admin'] == true && c['is_super_admin'] != true) _Pill(label: 'ADMIN', color: BFColors.signal),
+                    if (c['is_coach'] == true && c['is_admin'] != true) _Pill(label: 'COACH', color: BFColors.signalSoft),
+                    if (c['coach_id'] != null) _Pill(label: 'ASSIGNED', color: BFColors.success),
                   ],
                 ),
               ),
@@ -436,7 +437,7 @@ class _AdminsTabState extends State<_AdminsTab> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
+            style: FilledButton.styleFrom(backgroundColor: BFColors.signal),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Demote'),
           ),
@@ -475,19 +476,19 @@ class _AdminsTabState extends State<_AdminsTab> {
             return Card(
               child: ListTile(
                 leading: CircleAvatar(
-                  backgroundColor: isSuper ? Colors.deepPurple : Colors.purple,
+                  backgroundColor: isSuper ? BFColors.signal : BFColors.signal,
                   child: Icon(
                     isSuper ? Icons.shield : Icons.admin_panel_settings,
-                    color: Colors.white, size: 20,
+                    color: BFColors.cream, size: 20,
                   ),
                 ),
                 title: Text((a['name'] as String?) ?? a['email'] as String),
                 subtitle: Text(a['email'] as String,
                     style: const TextStyle(color: Colors.grey, fontSize: 12)),
                 trailing: isSuper
-                    ? _Pill(label: 'SUPER', color: Colors.deepPurple)
+                    ? _Pill(label: 'SUPER', color: BFColors.signal)
                     : IconButton(
-                        icon: const Icon(Icons.remove_circle_outline, color: Colors.redAccent),
+                        icon: const Icon(Icons.remove_circle_outline, color: BFColors.signal),
                         onPressed: () => _demote(a['email'] as String),
                       ),
               ),

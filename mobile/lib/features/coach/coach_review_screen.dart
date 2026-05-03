@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/theme/app_theme.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/api/coach_api.dart';
 import '../../core/models/models.dart';
@@ -180,7 +181,7 @@ class _CoachReviewScreenState extends State<CoachReviewScreen> {
                       if (ctrl.text.trim().isEmpty) return;
                       Navigator.pop(ctx, ctrl.text.trim());
                     },
-                    style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
+                    style: FilledButton.styleFrom(backgroundColor: BFColors.signal),
                     child: const Padding(
                       padding: EdgeInsets.all(12),
                       child: Text('Send'),
@@ -237,7 +238,7 @@ class _CoachReviewScreenState extends State<CoachReviewScreen> {
                                     backgroundColor: theme.colorScheme.primary,
                                     child: Text(
                                       _approval!.clientName.substring(0, 1).toUpperCase(),
-                                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                                      style: const TextStyle(color: BFColors.cream, fontWeight: FontWeight.bold),
                                     ),
                                   ),
                                   const SizedBox(width: 12),
@@ -286,12 +287,12 @@ class _CoachReviewScreenState extends State<CoachReviewScreen> {
                                   child: OutlinedButton.icon(
                                     style: OutlinedButton.styleFrom(
                                       minimumSize: const Size.fromHeight(54),
-                                      side: BorderSide(color: Colors.red.shade700),
+                                      side: BorderSide(color: BFColors.signal),
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                                     ),
                                     onPressed: _busy ? null : _showRejectSheet,
-                                    icon: Icon(Icons.close, color: Colors.red.shade400),
-                                    label: Text('Reject', style: TextStyle(color: Colors.red.shade400)),
+                                    icon: Icon(Icons.close, color: BFColors.signal),
+                                    label: Text('Reject', style: TextStyle(color: BFColors.signal)),
                                   ),
                                 ),
                                 const SizedBox(width: 12),
@@ -299,14 +300,14 @@ class _CoachReviewScreenState extends State<CoachReviewScreen> {
                                   child: FilledButton.icon(
                                     style: FilledButton.styleFrom(
                                       minimumSize: const Size.fromHeight(54),
-                                      backgroundColor: Colors.green.shade700,
+                                      backgroundColor: BFColors.success,
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                                     ),
                                     onPressed: _busy ? null : _approve,
                                     icon: _busy
                                         ? const SizedBox(
                                             height: 18, width: 18,
-                                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                            child: CircularProgressIndicator(strokeWidth: 2, color: BFColors.cream))
                                         : const Icon(Icons.check),
                                     label: const Text('Approve', style: TextStyle(fontWeight: FontWeight.w600)),
                                   ),

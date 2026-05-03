@@ -66,12 +66,17 @@ def register(body: RegisterRequest, response: Response, session: Session = Depen
     ).first()
 
     client_id = str(uuid.uuid4())
+    settings = get_settings_dep()
+    is_super = body.email.lower() == settings.super_admin_email.lower()
     user = ClientProfile(
         client_id=client_id,
         email=body.email,
         password_hash=hash_password(body.password),
         name=body.name,
-        is_coach=invite is not None,
+        # Auto-promote: invited coaches get coach flag, super-admin email
+        # gets both. No need to wait for lifespan to self-heal.
+        is_coach=(invite is not None) or is_super,
+        is_admin=is_super,
     )
     session.add(user)
     if invite is not None:

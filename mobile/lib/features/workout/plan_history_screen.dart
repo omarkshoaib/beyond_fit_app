@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/theme/app_theme.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/plans_api.dart';
 import '../../core/models/models.dart';
@@ -50,11 +51,11 @@ class _PlanHistoryScreenState extends State<PlanHistoryScreen> {
                       child: ListTile(
                         leading: CircleAvatar(
                           backgroundColor: item.status == 'active'
-                              ? Colors.green.withOpacity(0.2)
+                              ? BFColors.success.withOpacity(0.2)
                               : Colors.grey.withOpacity(0.2),
                           child: Text('W${item.weekNumber}',
                               style: TextStyle(
-                                  color: item.status == 'active' ? Colors.green : Colors.grey,
+                                  color: item.status == 'active' ? BFColors.success : Colors.grey,
                                   fontWeight: FontWeight.bold,
                                   fontSize: 12)),
                         ),
@@ -64,14 +65,14 @@ class _PlanHistoryScreenState extends State<PlanHistoryScreen> {
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                           decoration: BoxDecoration(
                             color: item.status == 'active'
-                                ? Colors.green.withOpacity(0.15)
+                                ? BFColors.success.withOpacity(0.15)
                                 : Colors.grey.withOpacity(0.15),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Text(
                             item.status.toUpperCase(),
                             style: TextStyle(
-                                color: item.status == 'active' ? Colors.green : Colors.grey,
+                                color: item.status == 'active' ? BFColors.success : Colors.grey,
                                 fontSize: 11,
                                 fontWeight: FontWeight.w600),
                           ),

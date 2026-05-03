@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/theme/app_theme.dart';
 import '../../core/api/api_client.dart';
 
 class NutritionScreen extends StatefulWidget {
@@ -82,9 +83,9 @@ class _NutritionPlanView extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
                 _MacroChip('Calories', '${totalCalories ?? "—"}', Colors.orange),
-                _MacroChip('Protein', '${protein?.toStringAsFixed(0) ?? "—"}g', Colors.blue),
-                _MacroChip('Carbs', '${carbs?.toStringAsFixed(0) ?? "—"}g', Colors.green),
-                _MacroChip('Fat', '${fat?.toStringAsFixed(0) ?? "—"}g', Colors.purple),
+                _MacroChip('Protein', '${protein?.toStringAsFixed(0) ?? "—"}g', BFColors.signalSoft),
+                _MacroChip('Carbs', '${carbs?.toStringAsFixed(0) ?? "—"}g', BFColors.success),
+                _MacroChip('Fat', '${fat?.toStringAsFixed(0) ?? "—"}g', BFColors.signal),
               ],
             ),
           ),

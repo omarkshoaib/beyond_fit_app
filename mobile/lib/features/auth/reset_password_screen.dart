@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/theme/app_theme.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/api/auth_api.dart';
 
@@ -118,7 +119,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                       child: _loading
                           ? const SizedBox(
                               height: 22, width: 22,
-                              child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white))
+                              child: CircularProgressIndicator(strokeWidth: 2.4, color: BFColors.cream))
                           : const Text('Set new password',
                               style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                     ),

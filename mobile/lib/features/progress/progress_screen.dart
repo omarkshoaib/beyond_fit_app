@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/theme/app_theme.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../../core/api/profile_api.dart';
 import '../../core/models/models.dart';
@@ -44,7 +45,7 @@ class _ProgressScreenState extends State<ProgressScreen> {
                       title: 'RPE Trend',
                       subtitle: 'Lower = easier relative effort',
                       data: _data!.rpeTrend,
-                      color: Colors.orange,
+                      color: BFColors.signal,
                       minY: 5,
                       maxY: 11,
                     ),
@@ -53,7 +54,7 @@ class _ProgressScreenState extends State<ProgressScreen> {
                       title: 'Load Trend',
                       subtitle: 'Average weight across main lifts (kg)',
                       data: _data!.weightTrend,
-                      color: Colors.blue,
+                      color: BFColors.signalSoft,
                     ),
                   ],
                 ),
