@@ -41,4 +41,19 @@ class AuthApi {
   }
 
   static Future<void> logout() => TokenStorage.clear();
+
+  static Future<void> forgotPassword({required String email}) async {
+    await _dio.post('/auth/forgot', data: {'email': email});
+  }
+
+  static Future<void> resetPassword({required String token, required String newPassword}) async {
+    final resp = await _dio.post('/auth/reset', data: {
+      'token': token,
+      'new_password': newPassword,
+    });
+    await TokenStorage.saveTokens(
+      accessToken: resp.data['access_token'] as String,
+      refreshToken: resp.data['refresh_token'] as String,
+    );
+  }
 }

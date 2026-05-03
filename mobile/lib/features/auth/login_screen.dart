@@ -152,7 +152,11 @@ class _LoginScreenState extends State<LoginScreen> {
                               child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white))
                           : const Text('Sign In', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: () => context.go('/forgot'),
+                      child: const Text('Forgot password?'),
+                    ),
                     TextButton(
                       onPressed: () => context.go('/register'),
                       child: const Text("Don't have an account? Sign up"),

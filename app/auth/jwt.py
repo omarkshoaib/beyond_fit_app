@@ -9,6 +9,7 @@ from passlib.context import CryptContext
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24h
 REFRESH_TOKEN_EXPIRE_DAYS = 30
+RESET_TOKEN_EXPIRE_MINUTES = 30
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -40,6 +41,26 @@ def decode_token(token: str) -> Optional[str]:
     """Decode any token, return subject (`sub`). Returns None on failure."""
     try:
         payload = jwt.decode(token, _secret_key(), algorithms=[ALGORITHM])
+        return payload.get("sub")
+    except JWTError:
+        return None
+
+
+def create_reset_token(subject: str) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(minutes=RESET_TOKEN_EXPIRE_MINUTES)
+    return jwt.encode(
+        {"sub": subject, "exp": expire, "type": "password_reset"},
+        _secret_key(),
+        algorithm=ALGORITHM,
+    )
+
+
+def decode_reset_token(token: str) -> Optional[str]:
+    """Return subject only if token is a non-expired password-reset token."""
+    try:
+        payload = jwt.decode(token, _secret_key(), algorithms=[ALGORITHM])
+        if payload.get("type") != "password_reset":
+            return None
         return payload.get("sub")
     except JWTError:
         return None

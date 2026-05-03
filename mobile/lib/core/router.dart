@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../features/auth/login_screen.dart';
 import '../features/auth/register_screen.dart';
+import '../features/auth/forgot_password_screen.dart';
+import '../features/auth/reset_password_screen.dart';
 import '../features/onboarding/onboarding_screen.dart';
 import '../features/home/home_screen.dart';
 import '../features/workout/workout_screen.dart';
@@ -29,15 +31,26 @@ final router = GoRouter(
   redirect: (context, state) async {
     final token = await TokenStorage.getAccessToken();
     final loc = state.matchedLocation;
-    final onAuth = loc == '/login' || loc == '/register';
+    final isPublic = loc == '/login' ||
+        loc == '/register' ||
+        loc == '/forgot' ||
+        loc == '/reset';
 
-    if (token == null && !onAuth) return '/login';
-    if (token != null && onAuth) return '/home';
+    if (token == null && !isPublic) return '/login';
+    if (token != null && (loc == '/login' || loc == '/register')) return '/home';
     return null;
   },
   routes: [
     GoRoute(path: '/login', pageBuilder: (c, s) => _fade(const LoginScreen())),
     GoRoute(path: '/register', pageBuilder: (c, s) => _fade(const RegisterScreen())),
+    GoRoute(path: '/forgot', pageBuilder: (c, s) => _fade(const ForgotPasswordScreen())),
+    GoRoute(
+      path: '/reset',
+      pageBuilder: (c, s) {
+        final token = s.uri.queryParameters['token'] ?? '';
+        return _fade(ResetPasswordScreen(token: token));
+      },
+    ),
     GoRoute(path: '/onboarding', pageBuilder: (c, s) => _fade(const OnboardingScreen())),
     GoRoute(path: '/home', pageBuilder: (c, s) => _fade(const HomeScreen())),
     GoRoute(path: '/workout', pageBuilder: (c, s) => _fade(const WorkoutScreen())),

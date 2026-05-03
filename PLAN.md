@@ -116,11 +116,11 @@ This document inventories what's working end-to-end vs. what still needs to be b
 
 1. ~~**Refresh token endpoint + rotation.**~~ ✅ Done. `POST /auth/refresh` rotates both access + refresh. Mobile interceptor retries the original request once after refreshing on 401, only clears tokens if refresh itself fails. Tests: `test_refresh_returns_new_pair`, `test_refresh_rejects_access_token`, `test_refresh_rejects_garbage`.
 2. **`httpOnly` cookie or secure mobile-only storage on web.** Replace `localStorage` with backend-set `httpOnly; Secure; SameSite=Strict` cookies for the web build. Keep `flutter_secure_storage` for native.
-3. **Forgot-password flow.** `POST /auth/forgot` (sends signed reset link via SMTP) + `POST /auth/reset` (consumes token + sets new password) + UI screens.
+3. ~~**Forgot-password flow.**~~ ✅ Done. `POST /auth/forgot` (always returns 200 to avoid account enumeration) sends a signed JWT reset token via SMTP using `EmailService.send_password_reset`. `POST /auth/reset` consumes the token (30-min TTL) + sets a new bcrypt hash + returns fresh access/refresh tokens for auto-login. New mobile screens `/forgot` and `/reset?token=…` with "Forgot password?" link on login. 6 tests added covering happy path + invalid token + short password + account enumeration resistance.
 4. **Email verification at registration.** Currently anyone can register with any email. Add `verified_at` field + verify-link flow + gate critical actions on it.
 5. ~~**Strong `AUTH_SECRET_KEY` in deployment.**~~ ✅ Done. `scripts/generate_secret.py` generates a base64url 64-char secret. Backend logs a `⚠️` warning at startup if the default placeholder is still in use. Same warning fires for `CORS_ALLOWED_ORIGINS=*`.
 6. ~~**CORS lockdown.**~~ ✅ Done — settings-driven, startup warning when wide-open.
-7. **CI/CD pipeline.** Run `pytest`, `flutter analyze`, `flutter build apk`, `flutter build ios`, `alembic upgrade head` on every push.
+7. ~~**CI/CD pipeline.**~~ ✅ Done (partial). `.github/workflows/ci.yml` runs two parallel jobs on every push + PR: backend (`pytest -q` against SQLite) and mobile (`flutter analyze` + `flutter build web`). Still missing for full CD: APK + iOS archive jobs (need signing certs), `alembic upgrade head` against an ephemeral Postgres service.
 8. **App icons + splash screens.** `flutter_launcher_icons` + `flutter_native_splash` configs aren't set; current icons are the Flutter default.
 9. **Deep links / universal links** for iOS + `intent-filter`s for Android (so password-reset emails open the app).
 10. **App-store metadata.** Privacy policy URL, screenshots, app description, in-app purchase model (if any).

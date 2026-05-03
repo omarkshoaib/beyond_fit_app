@@ -125,6 +125,68 @@ def test_refresh_rejects_garbage(client):
     assert resp.status_code == 401
 
 
+def test_forgot_password_returns_ok_for_unknown_email(client):
+    """Unknown emails must still return 200 to avoid account enumeration."""
+    resp = client.post("/api/v1/auth/forgot", json={"email": "nobody@nowhere.com"})
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+
+def test_forgot_password_returns_ok_for_known_email(client, monkeypatch):
+    """Known emails trigger send_password_reset and still return 200."""
+    sent = []
+    monkeypatch.setattr(
+        "app.api.auth.EmailService.send_password_reset",
+        lambda recipient_email, reset_token, client_name="": (sent.append((recipient_email, reset_token)), True)[1],
+    )
+    resp = client.post("/api/v1/auth/forgot", json={"email": "test@beyondfit.com"})
+    assert resp.status_code == 200
+    assert len(sent) == 1
+    assert sent[0][0] == "test@beyondfit.com"
+    assert sent[0][1]  # reset token was generated
+
+
+def test_reset_password_with_valid_token_works(client, monkeypatch):
+    """Valid reset token sets new password + returns fresh tokens; old password no longer works."""
+    captured: dict = {}
+    monkeypatch.setattr(
+        "app.api.auth.EmailService.send_password_reset",
+        lambda recipient_email, reset_token, client_name="": (captured.update(token=reset_token), True)[1],
+    )
+    client.post("/api/v1/auth/forgot", json={"email": "test@beyondfit.com"})
+    token = captured["token"]
+
+    resp = client.post("/api/v1/auth/reset", json={"token": token, "new_password": "BrandNewPw99"})
+    assert resp.status_code == 200, resp.text
+    assert "access_token" in resp.json()
+
+    # Old password fails
+    old = client.post("/api/v1/auth/login",
+                      json={"email": "test@beyondfit.com", "password": "SecurePass123"})
+    assert old.status_code == 401
+    # New password works
+    new = client.post("/api/v1/auth/login",
+                      json={"email": "test@beyondfit.com", "password": "BrandNewPw99"})
+    assert new.status_code == 200
+
+    # Restore original password so other module-scoped tests still pass
+    captured.clear()
+    client.post("/api/v1/auth/forgot", json={"email": "test@beyondfit.com"})
+    client.post("/api/v1/auth/reset",
+                json={"token": captured["token"], "new_password": "SecurePass123"})
+
+
+def test_reset_password_rejects_short(client):
+    resp = client.post("/api/v1/auth/reset", json={"token": "x", "new_password": "short"})
+    assert resp.status_code == 400
+
+
+def test_reset_password_rejects_invalid_token(client):
+    resp = client.post("/api/v1/auth/reset",
+                      json={"token": "not-a-real-token", "new_password": "ValidPw123"})
+    assert resp.status_code == 400
+
+
 # ── Plans ─────────────────────────────────────────────────────────────────────
 
 def test_plans_current_no_plan(client, auth_headers):
