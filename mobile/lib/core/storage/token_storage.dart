@@ -10,6 +10,15 @@ class TokenStorage {
   static const _refreshKey = 'refresh_token';
   static const _secure = FlutterSecureStorage();
 
+  static Future<void> saveAccessToken(String accessToken) async {
+    if (kIsWeb) {
+      final p = await SharedPreferences.getInstance();
+      await p.setString(_accessKey, accessToken);
+    } else {
+      await _secure.write(key: _accessKey, value: accessToken);
+    }
+  }
+
   static Future<void> saveTokens({
     required String accessToken,
     required String refreshToken,

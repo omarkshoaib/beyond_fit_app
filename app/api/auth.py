@@ -5,8 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 
 from app.auth.deps import get_db, get_current_user
-from app.auth.jwt import create_access_token, create_refresh_token, hash_password, verify_password
-from app.auth.schemas import LoginRequest, RegisterRequest, TokenResponse
+from app.auth.jwt import create_access_token, create_refresh_token, decode_refresh_token, hash_password, verify_password
+from app.auth.schemas import LoginRequest, RefreshRequest, RegisterRequest, TokenResponse
 from app.models import ClientProfile
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -43,6 +43,21 @@ def login(body: LoginRequest, session: Session = Depends(get_db)):
     return TokenResponse(
         access_token=create_access_token(user.client_id),
         refresh_token=create_refresh_token(user.client_id),
+    )
+
+
+@router.post("/refresh", response_model=TokenResponse)
+def refresh(body: RefreshRequest, session: Session = Depends(get_db)):
+    """Trade a valid refresh token for a fresh access + refresh pair (rotation)."""
+    client_id = decode_refresh_token(body.refresh_token)
+    if client_id is None:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+    user = session.get(ClientProfile, client_id)
+    if user is None:
+        raise HTTPException(status_code=401, detail="User no longer exists")
+    return TokenResponse(
+        access_token=create_access_token(client_id),
+        refresh_token=create_refresh_token(client_id),
     )
 
 

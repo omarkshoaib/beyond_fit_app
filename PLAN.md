@@ -114,12 +114,12 @@ This document inventories what's working end-to-end vs. what still needs to be b
 
 ### P0 — required before App Store / Play Store submission
 
-1. **Refresh token endpoint + rotation.** Wire `POST /auth/refresh` returning a new access token from a valid refresh token. Mobile interceptor should attempt one refresh on 401 before logging the user out.
+1. ~~**Refresh token endpoint + rotation.**~~ ✅ Done. `POST /auth/refresh` rotates both access + refresh. Mobile interceptor retries the original request once after refreshing on 401, only clears tokens if refresh itself fails. Tests: `test_refresh_returns_new_pair`, `test_refresh_rejects_access_token`, `test_refresh_rejects_garbage`.
 2. **`httpOnly` cookie or secure mobile-only storage on web.** Replace `localStorage` with backend-set `httpOnly; Secure; SameSite=Strict` cookies for the web build. Keep `flutter_secure_storage` for native.
 3. **Forgot-password flow.** `POST /auth/forgot` (sends signed reset link via SMTP) + `POST /auth/reset` (consumes token + sets new password) + UI screens.
 4. **Email verification at registration.** Currently anyone can register with any email. Add `verified_at` field + verify-link flow + gate critical actions on it.
-5. **Strong `AUTH_SECRET_KEY` in deployment.** Setting still defaults to `change-me-in-production`. Ensure deploy template generates a 32-byte random secret.
-6. **CORS lockdown.** Set `CORS_ALLOWED_ORIGINS` to the explicit prod origin(s) before launch.
+5. ~~**Strong `AUTH_SECRET_KEY` in deployment.**~~ ✅ Done. `scripts/generate_secret.py` generates a base64url 64-char secret. Backend logs a `⚠️` warning at startup if the default placeholder is still in use. Same warning fires for `CORS_ALLOWED_ORIGINS=*`.
+6. ~~**CORS lockdown.**~~ ✅ Done — settings-driven, startup warning when wide-open.
 7. **CI/CD pipeline.** Run `pytest`, `flutter analyze`, `flutter build apk`, `flutter build ios`, `alembic upgrade head` on every push.
 8. **App icons + splash screens.** `flutter_launcher_icons` + `flutter_native_splash` configs aren't set; current icons are the Flutter default.
 9. **Deep links / universal links** for iOS + `intent-filter`s for Android (so password-reset emails open the app).

@@ -1,8 +1,11 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, create_engine, SQLModel
+
+logger = logging.getLogger(__name__)
 
 from app.settings import get_settings
 from app.container import Container
@@ -25,6 +28,19 @@ def _make_engine(database_url: str):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+
+    if settings.auth_secret_key in ("", "change-me-in-production"):
+        logger.warning(
+            "⚠️  AUTH_SECRET_KEY is using the default placeholder. "
+            "Run `python scripts/generate_secret.py --append-to .env` and restart "
+            "before exposing this server to anyone but yourself."
+        )
+    if settings.cors_allowed_origins.strip() == "*":
+        logger.warning(
+            "⚠️  CORS allows all origins (*). Set CORS_ALLOWED_ORIGINS to your "
+            "explicit frontend URL(s) before deploying to production."
+        )
+
     engine = _make_engine(settings.database_url)
     SQLModel.metadata.create_all(engine)
 

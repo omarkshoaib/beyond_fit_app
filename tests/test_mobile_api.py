@@ -100,6 +100,31 @@ def test_me_bad_token_fails(client):
     assert resp.status_code == 401
 
 
+def test_refresh_returns_new_pair(client, registered_user):
+    """Valid refresh token issues a fresh access + refresh pair."""
+    refresh = registered_user["refresh_token"]
+    resp = client.post("/api/v1/auth/refresh", json={"refresh_token": refresh})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert "access_token" in data
+    assert "refresh_token" in data
+    # New access token must work
+    me = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {data['access_token']}"})
+    assert me.status_code == 200
+
+
+def test_refresh_rejects_access_token(client, registered_user):
+    """Passing an access token to /refresh must fail (only refresh-typed allowed)."""
+    access = registered_user["access_token"]
+    resp = client.post("/api/v1/auth/refresh", json={"refresh_token": access})
+    assert resp.status_code == 401
+
+
+def test_refresh_rejects_garbage(client):
+    resp = client.post("/api/v1/auth/refresh", json={"refresh_token": "not-a-token"})
+    assert resp.status_code == 401
+
+
 # ── Plans ─────────────────────────────────────────────────────────────────────
 
 def test_plans_current_no_plan(client, auth_headers):

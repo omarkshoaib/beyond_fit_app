@@ -37,8 +37,20 @@ def create_refresh_token(subject: str) -> str:
 
 
 def decode_token(token: str) -> Optional[str]:
+    """Decode any token, return subject (`sub`). Returns None on failure."""
     try:
         payload = jwt.decode(token, _secret_key(), algorithms=[ALGORITHM])
+        return payload.get("sub")
+    except JWTError:
+        return None
+
+
+def decode_refresh_token(token: str) -> Optional[str]:
+    """Decode a token, return subject only if it's a refresh-typed token."""
+    try:
+        payload = jwt.decode(token, _secret_key(), algorithms=[ALGORITHM])
+        if payload.get("type") != "refresh":
+            return None
         return payload.get("sub")
     except JWTError:
         return None
