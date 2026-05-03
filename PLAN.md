@@ -161,6 +161,31 @@ This document inventories what's working end-to-end vs. what still needs to be b
 
 ---
 
+## Future auth-flow change (deferred — explicit owner request)
+
+The current model lets anyone register and lets an admin promote anyone to coach. Owner wants a stricter, invite-only model for coaches and a super-admin role.
+
+### Target state
+
+- **Super-admin** — single hardcoded email: `omarkshoaib@outlook.com`. Cannot be revoked. Only the super-admin can promote / demote other admins.
+- **Admin** — appointed by super-admin. Can add or drop coaches and assign clients to coaches.
+- **Coach** — cannot self-register. Their email is pre-added by an admin. When the coach hits `/auth/register` with a pre-added email, they set their password and the account is created with `is_coach=True` already. Any other email registering as a coach is rejected.
+- **Client** — public self-registration as today.
+
+### Concrete changes when implementing
+
+1. **Schema** — new `pending_coach_invites` table (or a `coach_invite_token` field on `ClientProfile` for pre-allocated rows): `email, invited_by_admin_id, invited_at, accepted_at`.
+2. **Settings** — `SUPER_ADMIN_EMAIL=omarkshoaib@outlook.com` in `.env`. On lifespan startup, ensure the row with that email has `is_admin=True` and `is_coach=True`. Block `/admin/promote` and `/admin/demote` from touching this email.
+3. **`/admin/invite-coach`** — admin pre-creates an empty `ClientProfile` with `is_coach=True` + a flag like `pending_password=True`. Optionally email the invite link.
+4. **`/auth/register`** — if the email matches a pending coach invite, treat the registration as completing the invite (set password, drop the pending flag). Otherwise create a regular client.
+5. **`/admin/promote-admin`** + **`/admin/demote-admin`** — super-admin only. Reject if `current_user.email != SUPER_ADMIN_EMAIL`.
+6. **Mobile** — admin panel grows: list-of-admins tab, list-of-coaches tab with "+ Invite coach" button, list-of-clients tab. Super-admin sees all three; regular admins see only the coach + client tabs.
+7. **Tests** — non-super-admin trying to promote another user → 403. Pre-invited coach can register; non-invited email cannot register as coach. Existing coach/admin tests stay green.
+
+Until this lands, the bootstrap script `scripts/promote_admin.py` and the `/admin/promote` endpoint remain the way roles are managed.
+
+---
+
 ## Quick reference — directory map
 
 ```
