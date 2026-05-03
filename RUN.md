@@ -66,6 +66,50 @@ Wait ~30 seconds for the first build. Chrome will open with the app.
 
 ---
 
+## Coach + admin flow (full HITL approval)
+
+The original Telegram-based admin flow is now fully on mobile too. Two new roles:
+
+- **Coach** — reviews + approves clients' plans before they go active.
+- **Admin** — promotes coaches and assigns clients to coaches.
+
+### One-time setup: bootstrap your first admin
+
+After you've registered an account in the app, promote it from the command line (admins can only be created by another admin, so the first one needs the bootstrap script):
+
+```bash
+cd /media/shoaib/NewVolume/beyond_fit_app
+DATABASE_URL=sqlite:///./beyond_fit.db python scripts/promote_admin.py you@example.com
+```
+
+That account is now admin + coach. Sign out and sign in again — the app will route you to the Coach dashboard.
+
+### Admin: promote coaches and assign clients
+
+1. Profile → **Admin Panel** (purple icon, admins only).
+2. Tap **Promote Coach** → enter their email → optionally tick "Also grant admin".
+3. Tap **Assign Client** → enter client email + coach email.
+
+You'll see all users with COACH / ADMIN / ASSIGNED pills.
+
+### Coach: review + approve plans
+
+1. Sign in as a coach → automatically routed to **Coach Dashboard**.
+2. **Awaiting your review** section lists pending plans (with orange badge counts on client tiles).
+3. Tap a pending card → see full week (every day, every exercise, sets × reps × weight × RPE).
+4. **Approve** (green) → plan becomes the client's active plan.
+5. **Reject** (red) → bottom sheet for feedback message → logged to the plan's edit history; client must regenerate.
+
+### Client (with assigned coach)
+
+When a client with a coach generates a plan, the home screen shows:
+
+> **Plan under review** — Your coach is reviewing your plan. You will see it here as soon as it is approved.
+
+Once approved, the home screen flips to the regular Today's Session card. No coach assigned? Plans go straight to active (no approval needed) — useful for solo users.
+
+---
+
 ## Testing the next-week flow
 
 After completing your week:

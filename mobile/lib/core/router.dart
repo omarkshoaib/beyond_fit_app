@@ -12,6 +12,9 @@ import '../features/progress/progress_screen.dart';
 import '../features/profile/profile_screen.dart';
 import '../features/profile/edit_profile_screen.dart';
 import '../features/nutrition/nutrition_screen.dart';
+import '../features/coach/coach_home_screen.dart';
+import '../features/coach/coach_review_screen.dart';
+import '../features/admin/admin_screen.dart';
 import 'storage/token_storage.dart';
 
 CustomTransitionPage<T> _fade<T>(Widget child) => CustomTransitionPage<T>(
@@ -45,6 +48,12 @@ final router = GoRouter(
     GoRoute(path: '/profile', pageBuilder: (c, s) => _fade(const ProfileScreen())),
     GoRoute(path: '/profile/edit', pageBuilder: (c, s) => _fade(const EditProfileScreen())),
     GoRoute(path: '/nutrition', pageBuilder: (c, s) => _fade(const NutritionScreen())),
+    GoRoute(path: '/coach', pageBuilder: (c, s) => _fade(const CoachHomeScreen())),
+    GoRoute(
+      path: '/coach/review/:uuid',
+      pageBuilder: (c, s) => _fade(CoachReviewScreen(approvalUuid: s.pathParameters['uuid']!)),
+    ),
+    GoRoute(path: '/admin', pageBuilder: (c, s) => _fade(const AdminScreen())),
   ],
   errorBuilder: (context, state) => Scaffold(
     body: Center(child: Text('Page not found: ${state.uri}')),

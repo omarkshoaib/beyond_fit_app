@@ -272,3 +272,92 @@ def test_generate_plan_for_fresh_user(test_engine):
     assert today.json()["total_days"] == 4
 
     fastapi_app.dependency_overrides.clear()
+
+
+# ── Coach + admin flow ────────────────────────────────────────────────────────
+
+def test_coach_admin_full_flow(test_engine):
+    """Admin promotes coach, assigns client, client generates → pending → coach approves → active."""
+    from app.main import app as fastapi_app
+    from sqlmodel import Session
+    from app.auth.deps import get_db
+    from app.models import ClientProfile
+
+    def _override_db():
+        with Session(test_engine) as s:
+            yield s
+
+    fastapi_app.dependency_overrides[get_db] = _override_db
+    c = TestClient(fastapi_app)
+
+    # Register admin, coach, client
+    admin_reg = c.post("/api/v1/auth/register",
+                      json={"email": "admin@bf.com", "password": "Pass12345", "name": "Admin"})
+    coach_reg = c.post("/api/v1/auth/register",
+                      json={"email": "coach@bf.com", "password": "Pass12345", "name": "Coach"})
+    client_reg = c.post("/api/v1/auth/register",
+                       json={"email": "client@bf.com", "password": "Pass12345", "name": "Client"})
+
+    admin_h = {"Authorization": f"Bearer {admin_reg.json()['access_token']}"}
+    coach_h = {"Authorization": f"Bearer {coach_reg.json()['access_token']}"}
+    client_h = {"Authorization": f"Bearer {client_reg.json()['access_token']}"}
+
+    # Manually flip is_admin (bootstrap)
+    with Session(test_engine) as s:
+        admin_user = s.exec(select(ClientProfile).where(ClientProfile.email == "admin@bf.com")).first()
+        assert admin_user is not None
+        admin_user.is_admin = True
+        s.add(admin_user)
+        s.commit()
+
+    # Admin promotes coach
+    promote = c.post("/api/v1/admin/promote", headers=admin_h,
+                    json={"email": "coach@bf.com", "is_coach": True})
+    assert promote.status_code == 200, promote.text
+    assert promote.json()["is_coach"] is True
+
+    # Admin assigns client to coach
+    assign = c.post("/api/v1/admin/assign", headers=admin_h,
+                   json={"client_email": "client@bf.com", "coach_email": "coach@bf.com"})
+    assert assign.status_code == 200, assign.text
+
+    # Coach lists clients
+    coach_clients = c.get("/api/v1/coach/clients", headers=coach_h)
+    assert coach_clients.status_code == 200
+    assert any(cl["email"] == "client@bf.com" for cl in coach_clients.json())
+
+    # Client sets profile + generates plan → goes to pending
+    c.put("/api/v1/profile", headers=client_h, json={
+        "training_days": 4, "experience_level": "intermediate",
+        "available_equipment": ["full_gym"], "limitations": [],
+    })
+    gen = c.post("/api/v1/plans/generate", headers=client_h)
+    assert gen.status_code == 200, gen.text
+    assert gen.json()["status"] == "pending_approval"
+    approval_uuid = gen.json()["approval_uuid"]
+
+    # Client's /today shows pending_review flag
+    today = c.get("/api/v1/plans/today", headers=client_h)
+    assert today.json()["pending_review"] is True
+
+    # Coach sees the pending approval
+    pending_list = c.get("/api/v1/coach/pending", headers=coach_h)
+    assert pending_list.status_code == 200
+    assert len(pending_list.json()) == 1
+    assert pending_list.json()[0]["approval_uuid"] == approval_uuid
+
+    # Coach approves
+    approve = c.post(f"/api/v1/coach/approve/{approval_uuid}", headers=coach_h)
+    assert approve.status_code == 200, approve.text
+    assert approve.json()["ok"] is True
+
+    # Client's /today now has a real plan
+    today2 = c.get("/api/v1/plans/today", headers=client_h)
+    assert today2.json()["no_plan"] is False
+    assert today2.json()["total_days"] == 4
+
+    # Non-coach can't access coach endpoints
+    no_coach = c.get("/api/v1/coach/clients", headers=client_h)
+    assert no_coach.status_code == 403
+
+    fastapi_app.dependency_overrides.clear()

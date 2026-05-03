@@ -55,4 +55,8 @@ def me(user: ClientProfile = Depends(get_current_user)):
         "avatar": user.avatar,
         "experience_level": user.experience_level,
         "training_days": user.training_days,
+        "is_coach": user.is_coach,
+        "is_admin": user.is_admin,
+        "coach_id": user.coach_id,
+        "week_number": user.week_number,
     }

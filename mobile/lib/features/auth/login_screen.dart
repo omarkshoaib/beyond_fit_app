@@ -32,7 +32,15 @@ class _LoginScreenState extends State<LoginScreen> {
     });
     try {
       await AuthApi.login(email: _emailCtrl.text.trim(), password: _passCtrl.text);
-      if (mounted) context.go('/home');
+      // Branch by role: coach → /coach, otherwise → /home
+      final me = await AuthApi.me();
+      if (mounted) {
+        if (me.isCoach) {
+          context.go('/coach');
+        } else {
+          context.go('/home');
+        }
+      }
     } catch (e) {
       setState(() => _error = 'Invalid email or password');
     } finally {

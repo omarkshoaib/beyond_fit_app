@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, col, select
 
 from app.auth.deps import get_current_user, get_db
-from app.models import ClientProfile, WorkoutHistory
+from app.models import ClientProfile, PendingApproval, WorkoutHistory
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/plans", tags=["plans"])
@@ -57,6 +58,29 @@ def generate_plan(
         logger.exception("Plan generation failed for client %s", user.client_id)
         raise HTTPException(status_code=500, detail=f"Plan generation failed: {e}")
 
+    # If client has a coach assigned, route to PendingApproval queue
+    if user.coach_id:
+        approval_uuid = str(uuid.uuid4())
+        pending = PendingApproval(
+            approval_uuid=approval_uuid,
+            client_id=user.client_id,
+            client_chat_id=0,  # Mobile users have no telegram chat
+            client_name=user.name or "Client",
+            client_email=user.email or "",
+            workout_json=week.model_dump_json(),
+            coaching_message="",
+            created_at=datetime.now(timezone.utc),
+        )
+        session.add(pending)
+        session.add(user)
+        session.commit()
+        return {
+            "status": "pending_approval",
+            "approval_uuid": approval_uuid,
+            "message": "Your coach is reviewing your plan. You'll see it here once approved.",
+        }
+
+    # No coach — auto-activate
     row = WorkoutHistory(
         client_id=user.client_id,
         week_number=week.week_number,
@@ -100,7 +124,19 @@ def get_today_session(
         .order_by(col(WorkoutHistory.history_id).desc())
     ).first()
     if not row:
-        return {"day": None, "day_index": 0, "total_days": 0, "no_plan": True}
+        # Check if a pending approval exists
+        pending = session.exec(
+            select(PendingApproval).where(PendingApproval.client_id == user.client_id)
+        ).first()
+        if pending:
+            return {
+                "day": None,
+                "day_index": 0,
+                "total_days": 0,
+                "no_plan": True,
+                "pending_review": True,
+            }
+        return {"day": None, "day_index": 0, "total_days": 0, "no_plan": True, "pending_review": False}
 
     plan = json.loads(row.workout_json)
     days = plan.get("days", [])

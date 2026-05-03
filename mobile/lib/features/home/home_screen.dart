@@ -124,6 +124,17 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
+    if (_today?.pendingReview == true) {
+      return FriendlyState(
+        icon: Icons.fact_check_outlined,
+        title: 'Plan under review',
+        message: 'Your coach is reviewing your plan. You will see it here as soon as it is approved.',
+        actionLabel: 'Refresh',
+        onAction: _load,
+        iconColor: Colors.orange,
+      );
+    }
+
     if (_today?.noPlan == true) {
       return FriendlyState(
         icon: Icons.flag_outlined,

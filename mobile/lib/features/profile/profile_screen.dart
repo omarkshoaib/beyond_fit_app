@@ -96,6 +96,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         },
                       ),
                     ),
+                    if (_profile!.isCoach)
+                      Card(
+                        child: ListTile(
+                          leading: const Icon(Icons.supervisor_account, color: Colors.blue),
+                          title: const Text('Coach Dashboard'),
+                          trailing: const Icon(Icons.arrow_forward_ios, size: 14),
+                          onTap: () => context.go('/coach'),
+                        ),
+                      ),
+                    if (_profile!.isAdmin)
+                      Card(
+                        child: ListTile(
+                          leading: const Icon(Icons.admin_panel_settings, color: Colors.purple),
+                          title: const Text('Admin Panel'),
+                          trailing: const Icon(Icons.arrow_forward_ios, size: 14),
+                          onTap: () => context.go('/admin'),
+                        ),
+                      ),
                   ],
                 ),
     );

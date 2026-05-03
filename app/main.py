@@ -13,6 +13,8 @@ from app.api.profile import router as profile_router
 from app.api.checkin import router as checkin_router
 from app.api.progress import router as progress_router
 from app.api.nutrition import router as nutrition_router
+from app.api.coach import router as coach_router
+from app.api.admin import router as admin_router
 
 
 def _make_engine(database_url: str):
@@ -54,6 +56,8 @@ def get_app() -> FastAPI:
     app.include_router(checkin_router, prefix="/api/v1")
     app.include_router(progress_router, prefix="/api/v1")
     app.include_router(nutrition_router, prefix="/api/v1")
+    app.include_router(coach_router, prefix="/api/v1")
+    app.include_router(admin_router, prefix="/api/v1")
     return app
 
 
