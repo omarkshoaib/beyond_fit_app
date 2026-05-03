@@ -13,6 +13,13 @@ connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite")
 
 engine = create_engine(DATABASE_URL, echo=False, connect_args=connect_args)
 
+# Ensure tables exist at import time (covers TestClient flows that don't
+# trigger FastAPI lifespan and ad-hoc scripts that import app.database directly).
+# Idempotent for production: lifespan re-runs create_all anyway.
+import app.models  # noqa: F401  (ensure SQLModel metadata is populated)
+SQLModel.metadata.create_all(engine)
+
+
 def create_db_and_tables():
     """Initializes tables based on SQLModel inheritance in models.py"""
     SQLModel.metadata.create_all(engine)

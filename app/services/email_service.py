@@ -83,6 +83,41 @@ class EmailService:
             return False
 
     @staticmethod
+    def send_coach_invite(recipient_email: str, invited_by_name: str = "an admin") -> bool:
+        """Notify a pre-invited coach that their account is ready to be created."""
+        smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+        smtp_port = int(os.getenv("SMTP_PORT", "587"))
+        smtp_email = os.getenv("SMTP_EMAIL") or os.getenv("SMTP_USER")
+        smtp_pwd = os.getenv("SMTP_PASSWORD")
+        app_base_url = os.getenv("APP_BASE_URL", "https://beyondfit.app")
+
+        if not smtp_email or not smtp_pwd:
+            logging.error("Missing SMTP credentials — cannot send coach invite")
+            return False
+
+        msg = EmailMessage()
+        msg["Subject"] = "Beyond Fit — coach invitation"
+        msg["From"] = smtp_email
+        msg["To"] = recipient_email
+        msg.set_content(
+            f"Hi,\n\n{invited_by_name} has invited you to join Beyond Fit as a coach.\n\n"
+            f"Sign up at {app_base_url}/register using this email address ({recipient_email}). "
+            f"Your account will be activated as a coach automatically.\n\n"
+            f"— Beyond Fit"
+        )
+
+        try:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+                server.starttls()
+                server.login(smtp_email, smtp_pwd)
+                server.send_message(msg)
+            logging.info(f"Coach invite sent to {recipient_email}")
+            return True
+        except (smtplib.SMTPException, OSError, ValueError) as e:
+            logging.error(f"Failed to send coach invite to {recipient_email}: {e}", exc_info=True)
+            return False
+
+    @staticmethod
     def send_password_reset(recipient_email: str, reset_token: str, client_name: str = "Athlete") -> bool:
         """Send a password-reset email with a deep-link to the mobile app."""
         smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")

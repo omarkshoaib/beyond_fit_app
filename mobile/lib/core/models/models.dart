@@ -10,6 +10,7 @@ class UserProfile {
   final int? weekNumber;
   final bool isCoach;
   final bool isAdmin;
+  final bool isSuperAdmin;
   final String? coachId;
   final String? verifiedAt;
 
@@ -25,6 +26,7 @@ class UserProfile {
     this.weekNumber,
     this.isCoach = false,
     this.isAdmin = false,
+    this.isSuperAdmin = false,
     this.coachId,
     this.verifiedAt,
   });
@@ -43,6 +45,7 @@ class UserProfile {
         weekNumber: j['week_number'] as int?,
         isCoach: j['is_coach'] as bool? ?? false,
         isAdmin: j['is_admin'] as bool? ?? false,
+        isSuperAdmin: j['is_super_admin'] as bool? ?? false,
         coachId: j['coach_id'] as String?,
         verifiedAt: j['verified_at'] as String?,
       );

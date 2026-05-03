@@ -45,8 +45,9 @@ from app.auth.schemas import (
     TokenResponse,
     VerifyEmailRequest,
 )
-from app.models import ClientProfile
+from app.models import ClientProfile, CoachInvite
 from app.services.email_service import EmailService
+from app.settings import get_settings as get_settings_dep
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -57,14 +58,25 @@ def register(body: RegisterRequest, response: Response, session: Session = Depen
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
 
+    # Honour any pending coach invite for this email
+    invite = session.exec(
+        select(CoachInvite)
+        .where(CoachInvite.email == body.email)
+        .where(CoachInvite.accepted_at.is_(None))  # type: ignore[union-attr]
+    ).first()
+
     client_id = str(uuid.uuid4())
     user = ClientProfile(
         client_id=client_id,
         email=body.email,
         password_hash=hash_password(body.password),
         name=body.name,
+        is_coach=invite is not None,
     )
     session.add(user)
+    if invite is not None:
+        invite.accepted_at = datetime.now(timezone.utc)
+        session.add(invite)
     session.commit()
 
     # Fire-and-forget verify email; ignore failures so signup never blocks
@@ -191,6 +203,8 @@ def resend_verification(user: ClientProfile = Depends(get_current_user)):
 
 @router.get("/me")
 def me(user: ClientProfile = Depends(get_current_user)):
+    settings = get_settings_dep()
+    is_super = bool(user.email and user.email == settings.super_admin_email)
     return {
         "client_id": user.client_id,
         "email": user.email,
@@ -200,7 +214,28 @@ def me(user: ClientProfile = Depends(get_current_user)):
         "training_days": user.training_days,
         "is_coach": user.is_coach,
         "is_admin": user.is_admin,
+        "is_super_admin": is_super,
         "coach_id": user.coach_id,
         "week_number": user.week_number,
         "verified_at": user.verified_at.isoformat() if user.verified_at else None,
+    }
+
+
+@router.get("/whoami")
+def whoami(request: Request, user: ClientProfile = Depends(get_current_user)):
+    """Diagnostic endpoint: shows exactly what the server resolved + how it
+    found the token. Useful for debugging 403s after role changes."""
+    settings = get_settings_dep()
+    return {
+        "client_id": user.client_id,
+        "email": user.email,
+        "is_coach": user.is_coach,
+        "is_admin": user.is_admin,
+        "is_super_admin": user.email == settings.super_admin_email,
+        "coach_id": user.coach_id,
+        "verified_at": user.verified_at.isoformat() if user.verified_at else None,
+        "auth_source": {
+            "has_bearer_header": "authorization" in {k.lower() for k in request.headers.keys()},
+            "has_access_token_cookie": "access_token" in request.cookies,
+        },
     }

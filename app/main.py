@@ -1,9 +1,10 @@
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlmodel import Session, create_engine, SQLModel
+from sqlmodel import Session, create_engine, select, SQLModel
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,77 @@ def _make_engine(database_url: str):
     return create_engine(database_url, echo=False, connect_args=connect_args)
 
 
+def _run_migrations(database_url: str) -> bool:
+    """Run alembic upgrade head. Returns True on success, False on failure.
+    Skipped on SQLite (dev) because some legacy migrations don't support
+    SQLite's lack of full ALTER TABLE — dev relies on SQLModel.create_all."""
+    if database_url.startswith("sqlite"):
+        return False
+    try:
+        from alembic import command
+        from alembic.config import Config
+        cfg = Config(str(Path(__file__).resolve().parent.parent / "alembic.ini"))
+        cfg.set_main_option("sqlalchemy.url", database_url)
+        command.upgrade(cfg, "head")
+        return True
+    except Exception as e:
+        logger.warning(f"Alembic upgrade failed: {e}. Falling back to create_all().")
+        return False
+
+
+def _detect_schema_drift_and_rebuild(engine) -> None:
+    """SQLite-only: if the live `clientprofile` table is missing columns the
+    current model defines, DROP + CREATE all tables. Wipes data — only safe
+    for dev. Logs loudly when triggered."""
+    if not str(engine.url).startswith("sqlite"):
+        return
+    from sqlalchemy import inspect
+    from app.models import ClientProfile
+    inspector = inspect(engine)
+    if "clientprofile" not in inspector.get_table_names():
+        return  # fresh DB; create_all will handle it
+    live_cols = {c["name"] for c in inspector.get_columns("clientprofile")}
+    expected_cols = set(ClientProfile.__table__.columns.keys())
+    missing = expected_cols - live_cols
+    if missing:
+        logger.warning(
+            f"⚠️  Schema drift detected on SQLite. Missing columns: {sorted(missing)}. "
+            f"DROPPING + RECREATING all tables (dev DB is ephemeral)."
+        )
+        SQLModel.metadata.drop_all(engine)
+        SQLModel.metadata.create_all(engine)
+
+
+def _ensure_super_admin(engine) -> None:
+    """Self-heal the super-admin row. Forces is_admin=True + is_coach=True so
+    role drift after manual DB edits or partial migrations cannot lock everyone
+    out. If the row doesn't exist yet, log a warning — user must register first."""
+    from app.models import ClientProfile
+    settings = get_settings()
+    email = settings.super_admin_email
+    if not email:
+        return
+    with Session(engine) as session:
+        user = session.exec(select(ClientProfile).where(ClientProfile.email == email)).first()
+        if user is None:
+            logger.warning(
+                f"Super-admin email '{email}' has not registered yet. "
+                f"They will be auto-promoted on first login."
+            )
+            return
+        changed = False
+        if not user.is_admin:
+            user.is_admin = True
+            changed = True
+        if not user.is_coach:
+            user.is_coach = True
+            changed = True
+        if changed:
+            session.add(user)
+            session.commit()
+            logger.info(f"✅ Self-healed super-admin flags for {email}.")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
@@ -42,7 +114,17 @@ async def lifespan(app: FastAPI):
         )
 
     engine = _make_engine(settings.database_url)
-    SQLModel.metadata.create_all(engine)
+
+    # Postgres: alembic upgrade head. SQLite (dev): create_all + drift rebuild.
+    if settings.database_url.startswith("sqlite"):
+        _detect_schema_drift_and_rebuild(engine)
+        SQLModel.metadata.create_all(engine)
+    else:
+        if not _run_migrations(settings.database_url):
+            SQLModel.metadata.create_all(engine)
+
+    # Ensure the super-admin always has the right flags
+    _ensure_super_admin(engine)
 
     app.state.container = Container(
         settings=settings,
@@ -61,8 +143,9 @@ def get_app() -> FastAPI:
         allow_origins=origins,
         allow_methods=["*"],
         allow_headers=["*"],
-        # Note: allow_credentials stays False so wildcard origin is safe.
-        # If you flip this to True, allow_origins MUST be an explicit list.
+        # allow_credentials must stay False while allow_origins is wildcard.
+        # If you switch to an explicit origin list and want to send cookies
+        # cross-origin, flip this to True.
         allow_credentials=False,
     )
 

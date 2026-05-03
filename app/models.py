@@ -76,6 +76,17 @@ class PendingApproval(SQLModel, table=True):
     cancelled_at: Optional[datetime] = Field(default=None)
 
 
+class CoachInvite(SQLModel, table=True):
+    """Pre-registered coach emails. When the email signs up via /auth/register,
+    they're flagged is_coach=True automatically. accepted_at gets stamped at
+    that moment."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    email: str = Field(unique=True, index=True)
+    invited_by: str  # admin's client_id
+    invited_at: Optional[datetime] = Field(default=None)
+    accepted_at: Optional[datetime] = Field(default=None)
+
+
 class RejectionFeedback(SQLModel, table=True):
     """Coach-rejection messages, kept after PendingApproval is deleted so clients
     can read why their plan was rejected on the next /plans/today call."""

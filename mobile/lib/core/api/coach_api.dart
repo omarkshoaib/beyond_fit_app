@@ -54,4 +54,35 @@ class AdminApi {
     final resp = await _dio.get('/admin/clients');
     return (resp.data as List).cast<Map<String, dynamic>>();
   }
+
+  static Future<List<Map<String, dynamic>>> listCoaches() async {
+    final resp = await _dio.get('/admin/coaches');
+    return (resp.data as List).cast<Map<String, dynamic>>();
+  }
+
+  static Future<List<Map<String, dynamic>>> listCoachInvites() async {
+    final resp = await _dio.get('/admin/coaches/invites');
+    return (resp.data as List).cast<Map<String, dynamic>>();
+  }
+
+  static Future<void> inviteCoach({required String email}) async {
+    await _dio.post('/admin/coaches/invite', data: {'email': email});
+  }
+
+  static Future<void> withdrawCoachInvite({required String email}) async {
+    await _dio.delete('/admin/coaches/invite/$email');
+  }
+
+  static Future<List<Map<String, dynamic>>> listAdmins() async {
+    final resp = await _dio.get('/admin/admins');
+    return (resp.data as List).cast<Map<String, dynamic>>();
+  }
+
+  static Future<void> promoteAdmin({required String email}) async {
+    await _dio.post('/admin/admins/promote', data: {'email': email});
+  }
+
+  static Future<void> demoteAdmin({required String email}) async {
+    await _dio.post('/admin/admins/demote', data: {'email': email});
+  }
 }

@@ -28,7 +28,9 @@ def client(test_engine):
 
     fastapi_app.dependency_overrides[get_db] = _get_test_db
     yield TestClient(fastapi_app)
-    fastapi_app.dependency_overrides.clear()
+    # Don't blanket-clear: the module-scoped `client` fixture installed an
+    # override that other tests rely on. Just remove ours if we set it.
+    pass
 
 
 @pytest.fixture(scope="module")
@@ -223,6 +225,184 @@ def test_resend_verification_noop_if_verified(client, registered_user):
     r = client.post("/api/v1/auth/resend-verification", headers=headers)
     # Either path returns 200; if previous test verified, second call says already_verified
     assert r.status_code == 200
+
+
+def test_super_admin_self_heal_on_lifespan(test_engine):
+    """Super-admin row should be auto-promoted at lifespan startup."""
+    from app.main import _ensure_super_admin
+    from app.models import ClientProfile
+    from app.auth.jwt import hash_password
+    import uuid as _uuid
+
+    settings = __import__("app.settings", fromlist=["get_settings"]).get_settings()
+
+    # Insert a row matching super_admin_email but with flags False
+    with Session(test_engine) as s:
+        cid = str(_uuid.uuid4())
+        s.add(ClientProfile(
+            client_id=cid,
+            email=settings.super_admin_email,
+            password_hash=hash_password("Pw12345678"),
+            name="Super",
+            is_admin=False,
+            is_coach=False,
+        ))
+        s.commit()
+
+    _ensure_super_admin(test_engine)
+
+    with Session(test_engine) as s:
+        u = s.exec(select(ClientProfile).where(ClientProfile.email == settings.super_admin_email)).first()
+        assert u is not None
+        assert u.is_admin is True
+        assert u.is_coach is True
+
+
+def test_super_admin_cannot_be_demoted(test_engine):
+    """POST /admin/admins/demote on super-admin email returns 400."""
+    from app.main import app as fastapi_app
+    from app.auth.deps import get_db
+    from app.models import ClientProfile
+    from app.settings import get_settings as _gs
+
+    def _override():
+        with Session(test_engine) as s:
+            yield s
+    fastapi_app.dependency_overrides[get_db] = _override
+    c = TestClient(fastapi_app)
+    super_email = _gs().super_admin_email
+
+    # Ensure super-admin exists with proper flags
+    with Session(test_engine) as s:
+        u = s.exec(select(ClientProfile).where(ClientProfile.email == super_email)).first()
+        if u is None:
+            r = c.post("/api/v1/auth/register", json={
+                "email": super_email, "password": "Pw12345678", "name": "Super"
+            })
+            assert r.status_code == 201
+            u = s.exec(select(ClientProfile).where(ClientProfile.email == super_email)).first()
+        assert u is not None
+        u.is_admin = True
+        u.is_coach = True
+        s.add(u)
+        s.commit()
+
+    # Login as super-admin
+    login = c.post("/api/v1/auth/login", json={"email": super_email, "password": "Pw12345678"})
+    assert login.status_code == 200
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    resp = c.post("/api/v1/admin/admins/demote", headers=headers, json={"email": super_email})
+    assert resp.status_code == 400
+    assert "super-admin" in resp.json()["detail"].lower()
+    # Don't blanket-clear: the module-scoped `client` fixture installed an
+    # override that other tests rely on. Just remove ours if we set it.
+    pass
+
+
+def test_invited_email_registers_as_coach(test_engine):
+    """Coach invite happy path: admin invites email, that email registers, lands as coach."""
+    from app.main import app as fastapi_app
+    from app.auth.deps import get_db
+    from app.models import ClientProfile, CoachInvite
+
+    def _override():
+        with Session(test_engine) as s:
+            yield s
+    fastapi_app.dependency_overrides[get_db] = _override
+    c = TestClient(fastapi_app)
+
+    # Create admin
+    admin_reg = c.post("/api/v1/auth/register", json={
+        "email": "inv-admin@bf.com", "password": "Pw12345678", "name": "Inv Admin"})
+    assert admin_reg.status_code == 201
+    with Session(test_engine) as s:
+        u = s.exec(select(ClientProfile).where(ClientProfile.email == "inv-admin@bf.com")).first()
+        assert u is not None
+        u.is_admin = True
+        s.add(u)
+        s.commit()
+    admin_login = c.post("/api/v1/auth/login", json={
+        "email": "inv-admin@bf.com", "password": "Pw12345678"})
+    admin_h = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
+
+    # Invite a coach
+    inv = c.post("/api/v1/admin/coaches/invite", headers=admin_h,
+                 json={"email": "future-coach@bf.com"})
+    assert inv.status_code == 200, inv.text
+
+    # That email registers → should land with is_coach=True
+    reg = c.post("/api/v1/auth/register", json={
+        "email": "future-coach@bf.com", "password": "CoachPw123", "name": "Future Coach"})
+    assert reg.status_code == 201
+    me = c.get("/api/v1/auth/me",
+               headers={"Authorization": f"Bearer {reg.json()['access_token']}"})
+    assert me.status_code == 200
+    assert me.json()["is_coach"] is True
+
+    with Session(test_engine) as s:
+        invite = s.exec(
+            select(CoachInvite).where(CoachInvite.email == "future-coach@bf.com")
+        ).first()
+        assert invite is not None
+        assert invite.accepted_at is not None
+    # Don't blanket-clear: the module-scoped `client` fixture installed an
+    # override that other tests rely on. Just remove ours if we set it.
+    pass
+
+
+def test_non_invited_email_registers_as_client(test_engine):
+    """Email without an invite registers as a regular client, is_coach=False."""
+    from app.main import app as fastapi_app
+    from app.auth.deps import get_db
+
+    def _override():
+        with Session(test_engine) as s:
+            yield s
+    fastapi_app.dependency_overrides[get_db] = _override
+    c = TestClient(fastapi_app)
+
+    reg = c.post("/api/v1/auth/register", json={
+        "email": "plain-client@bf.com", "password": "Pw12345678", "name": "Plain"})
+    assert reg.status_code == 201
+    me = c.get("/api/v1/auth/me",
+               headers={"Authorization": f"Bearer {reg.json()['access_token']}"})
+    assert me.json()["is_coach"] is False
+    # Don't blanket-clear: the module-scoped `client` fixture installed an
+    # override that other tests rely on. Just remove ours if we set it.
+    pass
+
+
+def test_non_super_admin_cannot_promote_admin(test_engine):
+    """A regular admin (not super-admin) gets 403 from /admins/promote."""
+    from app.main import app as fastapi_app
+    from app.auth.deps import get_db
+    from app.models import ClientProfile
+
+    def _override():
+        with Session(test_engine) as s:
+            yield s
+    fastapi_app.dependency_overrides[get_db] = _override
+    c = TestClient(fastapi_app)
+
+    c.post("/api/v1/auth/register", json={
+        "email": "regular-admin@bf.com", "password": "Pw12345678", "name": "Reg"})
+    with Session(test_engine) as s:
+        u = s.exec(select(ClientProfile).where(ClientProfile.email == "regular-admin@bf.com")).first()
+        assert u is not None
+        u.is_admin = True
+        s.add(u)
+        s.commit()
+    login = c.post("/api/v1/auth/login", json={
+        "email": "regular-admin@bf.com", "password": "Pw12345678"})
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    resp = c.post("/api/v1/admin/admins/promote", headers=headers,
+                  json={"email": "anyone@bf.com"})
+    assert resp.status_code == 403
+    # Don't blanket-clear: the module-scoped `client` fixture installed an
+    # override that other tests rely on. Just remove ours if we set it.
+    pass
 
 
 def test_login_sets_httponly_cookies_and_cookie_auth_works(test_engine):
@@ -425,7 +605,9 @@ def test_generate_plan_for_fresh_user(test_engine):
     assert today.json()["no_plan"] is False
     assert today.json()["total_days"] == 4
 
-    fastapi_app.dependency_overrides.clear()
+    # Don't blanket-clear: the module-scoped `client` fixture installed an
+    # override that other tests rely on. Just remove ours if we set it.
+    pass
 
 
 # ── Coach + admin flow ────────────────────────────────────────────────────────
@@ -514,7 +696,9 @@ def test_coach_admin_full_flow(test_engine):
     no_coach = c.get("/api/v1/coach/clients", headers=client_h)
     assert no_coach.status_code == 403
 
-    fastapi_app.dependency_overrides.clear()
+    # Don't blanket-clear: the module-scoped `client` fixture installed an
+    # override that other tests rely on. Just remove ours if we set it.
+    pass
 
 
 def test_idempotent_generate_when_pending_exists(test_engine):
@@ -569,7 +753,9 @@ def test_idempotent_generate_when_pending_exists(test_engine):
         ).all()
         assert len(pending) == 1
 
-    fastapi_app.dependency_overrides.clear()
+    # Don't blanket-clear: the module-scoped `client` fixture installed an
+    # override that other tests rely on. Just remove ours if we set it.
+    pass
 
 
 def test_rejection_surfaces_feedback_to_client(test_engine):
@@ -629,4 +815,6 @@ def test_rejection_surfaces_feedback_to_client(test_engine):
     assert today2.json()["pending_review"] is True
     assert today2.json().get("rejection_feedback") is None
 
-    fastapi_app.dependency_overrides.clear()
+    # Don't blanket-clear: the module-scoped `client` fixture installed an
+    # override that other tests rely on. Just remove ours if we set it.
+    pass

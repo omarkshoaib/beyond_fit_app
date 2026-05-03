@@ -45,6 +45,9 @@ class Settings(BaseSettings):
 
     # ── Auth ────────────────────────────────────────────────────────
     auth_secret_key: str = "change-me-in-production"
+    # Hardcoded super-admin email. Lifespan self-heals this account so the
+    # super-admin can never lose their flags. Cannot be demoted via the API.
+    super_admin_email: str = "omarkshoaib@outlook.com"
 
     # ── CORS ────────────────────────────────────────────────────────
     # Comma-separated list of allowed origins. Default "*" = open (dev only).
