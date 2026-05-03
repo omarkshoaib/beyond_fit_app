@@ -23,8 +23,9 @@ dependencies:
   # HTTP
   dio: ^5.8.0
 
-  # Local storage (tokens)
+  # Local storage (tokens) — secure on iOS/Android, SharedPreferences on web
   flutter_secure_storage: ^9.2.4
+  shared_preferences: ^2.3.3
 
   # Charts
   fl_chart: ^0.71.0

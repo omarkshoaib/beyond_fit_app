@@ -61,14 +61,42 @@ class _CheckinScreenState extends State<CheckinScreen> {
 
   Future<void> _submit() async {
     if (_plan == null) return;
+
+    // Validate all fields filled
+    for (final s in _mainSlots) {
+      final idx = s['_idx'] as int;
+      final w = _weightCtrl[idx]?.text.trim() ?? '';
+      final r = _rpeCtrl[idx]?.text.trim() ?? '';
+      if (w.isEmpty || r.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Fill in weight and RPE for every lift')),
+        );
+        return;
+      }
+      final wNum = double.tryParse(w);
+      final rNum = int.tryParse(r);
+      if (wNum == null || wNum <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Weight must be a positive number')),
+        );
+        return;
+      }
+      if (rNum == null || rNum < 1 || rNum > 10) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('RPE must be between 1 and 10')),
+        );
+        return;
+      }
+    }
+
     setState(() => _submitting = true);
     try {
       final slots = _mainSlots.map((s) {
         final idx = s['_idx'] as int;
         return {
           'exercise_name': (s['exercise'] as Map?)?['name'] ?? '',
-          'actual_weight': double.tryParse(_weightCtrl[idx]?.text ?? '') ?? 0.0,
-          'actual_rpe': int.tryParse(_rpeCtrl[idx]?.text ?? '') ?? 7,
+          'actual_weight': double.parse(_weightCtrl[idx]!.text),
+          'actual_rpe': int.parse(_rpeCtrl[idx]!.text),
         };
       }).toList();
       await CheckinApi.submit(historyId: _plan!.id, slots: slots);

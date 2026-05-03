@@ -67,18 +67,25 @@ class TodaySession {
   final Map<String, dynamic>? day;
   final int dayIndex;
   final int totalDays;
+  final bool noPlan;
 
-  const TodaySession({this.day, required this.dayIndex, required this.totalDays});
+  const TodaySession({
+    this.day,
+    required this.dayIndex,
+    required this.totalDays,
+    this.noPlan = false,
+  });
 
   factory TodaySession.fromJson(Map<String, dynamic> j) => TodaySession(
         day: j['day'] as Map<String, dynamic>?,
-        dayIndex: j['day_index'] as int,
-        totalDays: j['total_days'] as int,
+        dayIndex: j['day_index'] as int? ?? 0,
+        totalDays: j['total_days'] as int? ?? 0,
+        noPlan: j['no_plan'] as bool? ?? false,
       );
 
   String get dayName => day?['day_name'] as String? ?? 'Rest Day';
   List<dynamic> get slots => (day?['slots'] as List?) ?? [];
-  bool get isRestDay => day == null;
+  bool get isRestDay => day == null && !noPlan;
 }
 
 class PlanHistoryItem {

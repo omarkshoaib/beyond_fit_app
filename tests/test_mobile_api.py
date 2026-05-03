@@ -107,6 +107,15 @@ def test_plans_current_no_plan(client, auth_headers):
     assert resp.status_code == 404
 
 
+def test_plans_today_no_plan_returns_empty(client, auth_headers):
+    """No active plan should return 200 with no_plan flag, not 404."""
+    resp = client.get("/api/v1/plans/today", headers=auth_headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["no_plan"] is True
+    assert data["day"] is None
+
+
 def test_plans_history_empty(client, auth_headers):
     resp = client.get("/api/v1/plans/history", headers=auth_headers)
     assert resp.status_code == 200
@@ -215,3 +224,51 @@ def test_progress_returns_trends(client, auth_headers, seeded_plan):
     assert "rpe_trend" in data
     assert "weight_trend" in data
     assert isinstance(data["rpe_trend"], list)
+
+
+# ── Plan generation (end-to-end onboarding flow) ──────────────────────────────
+
+def test_generate_plan_for_fresh_user(test_engine):
+    """A fresh user with default profile should be able to generate a first plan."""
+    from app.main import app as fastapi_app
+    from sqlmodel import Session
+    from app.auth.deps import get_db
+
+    def _override_db():
+        with Session(test_engine) as s:
+            yield s
+
+    fastapi_app.dependency_overrides[get_db] = _override_db
+    c = TestClient(fastapi_app)
+
+    reg = c.post("/api/v1/auth/register", json={
+        "email": "fresh@beyondfit.com",
+        "password": "Pass12345",
+        "name": "Fresh User",
+    })
+    assert reg.status_code == 201
+    headers = {"Authorization": f"Bearer {reg.json()['access_token']}"}
+
+    # Update profile to set onboarding choices
+    c.put("/api/v1/profile", headers=headers, json={
+        "training_days": 4,
+        "experience_level": "intermediate",
+        "available_equipment": ["full_gym"],
+        "limitations": [],
+    })
+
+    # Generate first plan
+    gen = c.post("/api/v1/plans/generate", headers=headers)
+    assert gen.status_code == 200, gen.text
+    plan = gen.json()
+    assert plan["status"] == "active"
+    assert plan["week_number"] == 1
+    assert len(plan["workout"]["days"]) == 4
+
+    # Today's session now returns a real plan
+    today = c.get("/api/v1/plans/today", headers=headers)
+    assert today.status_code == 200
+    assert today.json()["no_plan"] is False
+    assert today.json()["total_days"] == 4
+
+    fastapi_app.dependency_overrides.clear()

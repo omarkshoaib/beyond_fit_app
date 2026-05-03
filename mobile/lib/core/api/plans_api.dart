@@ -20,4 +20,9 @@ class PlansApi {
         .map((e) => PlanHistoryItem.fromJson(e as Map<String, dynamic>))
         .toList();
   }
+
+  static Future<WorkoutPlan> generate() async {
+    final resp = await _dio.post('/plans/generate');
+    return WorkoutPlan.fromJson(resp.data as Map<String, dynamic>);
+  }
 }

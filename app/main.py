@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, create_engine, SQLModel
 
 from app.settings import get_settings
@@ -34,6 +35,13 @@ async def lifespan(app: FastAPI):
 
 def get_app() -> FastAPI:
     app = FastAPI(title="Deterministic Coaching Engine", lifespan=lifespan)
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.get("/")
     def read_root():

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/api/auth_api.dart';
+import '../../core/api/plans_api.dart';
 import '../../core/api/profile_api.dart';
 import '../../core/models/models.dart';
 
@@ -77,10 +78,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                     Card(
                       child: ListTile(
-                        leading: const Icon(Icons.help_outline),
-                        title: const Text('Help & FAQ'),
+                        leading: const Icon(Icons.refresh),
+                        title: const Text('Generate New Plan'),
+                        subtitle: const Text('Replace your current plan with a fresh one'),
                         trailing: const Icon(Icons.arrow_forward_ios, size: 14),
-                        onTap: () => context.go('/help'),
+                        onTap: () async {
+                          final messenger = ScaffoldMessenger.of(context);
+                          final router = GoRouter.of(context);
+                          try {
+                            await PlansApi.generate();
+                            if (!context.mounted) return;
+                            messenger.showSnackBar(const SnackBar(content: Text('New plan generated')));
+                            router.go('/home');
+                          } catch (_) {
+                            messenger.showSnackBar(const SnackBar(content: Text('Could not generate plan')));
+                          }
+                        },
                       ),
                     ),
                   ],

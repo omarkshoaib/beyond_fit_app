@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+from datetime import datetime, timezone
 from typing import Any, Dict
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, col, select
@@ -8,6 +10,7 @@ from sqlmodel import Session, col, select
 from app.auth.deps import get_current_user, get_db
 from app.models import ClientProfile, WorkoutHistory
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/plans", tags=["plans"])
 
 
@@ -22,6 +25,51 @@ def _parse_plan(row: WorkoutHistory) -> Dict[str, Any]:
         "coaching_message": None,
         "workout": data,
     }
+
+
+@router.post("/generate")
+def generate_plan(
+    user: ClientProfile = Depends(get_current_user),
+    session: Session = Depends(get_db),
+):
+    """Generate a fresh deterministic plan for the authenticated user and persist it."""
+    from app.generator import WorkoutGenerator, SafetyRefusalError
+
+    # Mark prior active plans as superseded; bump week if regenerating
+    prior = session.exec(
+        select(WorkoutHistory)
+        .where(WorkoutHistory.client_id == user.client_id)
+        .where(WorkoutHistory.status == "active")
+    ).all()
+    for p in prior:
+        p.status = "superseded"
+        session.add(p)
+    if prior:
+        user.week_number = (user.week_number or 0) + 1
+    elif not user.week_number:
+        user.week_number = 1
+
+    try:
+        week = WorkoutGenerator().generate(client=user)
+    except SafetyRefusalError as e:
+        raise HTTPException(status_code=400, detail=f"Safety gate triggered: {e.reason}")
+    except Exception as e:
+        logger.exception("Plan generation failed for client %s", user.client_id)
+        raise HTTPException(status_code=500, detail=f"Plan generation failed: {e}")
+
+    row = WorkoutHistory(
+        client_id=user.client_id,
+        week_number=week.week_number,
+        block_number=((week.week_number - 1) // 5) + 1,
+        status="active",
+        plan_started_at=datetime.now(timezone.utc),
+        workout_json=week.model_dump_json(),
+    )
+    session.add(row)
+    session.add(user)
+    session.commit()
+    session.refresh(row)
+    return _parse_plan(row)
 
 
 @router.get("/current")
@@ -45,7 +93,6 @@ def get_today_session(
     user: ClientProfile = Depends(get_current_user),
     session: Session = Depends(get_db),
 ):
-    from datetime import datetime, timezone
     row = session.exec(
         select(WorkoutHistory)
         .where(WorkoutHistory.client_id == user.client_id)
@@ -53,12 +100,11 @@ def get_today_session(
         .order_by(col(WorkoutHistory.history_id).desc())
     ).first()
     if not row:
-        raise HTTPException(status_code=404, detail="No active plan")
+        return {"day": None, "day_index": 0, "total_days": 0, "no_plan": True}
 
     plan = json.loads(row.workout_json)
     days = plan.get("days", [])
 
-    # Use plan_started_at offset to determine today's session
     if row.plan_started_at:
         offset = (datetime.now(timezone.utc) - row.plan_started_at.replace(tzinfo=timezone.utc)).days
         idx = offset % len(days) if days else 0
@@ -66,7 +112,7 @@ def get_today_session(
         idx = datetime.now(timezone.utc).weekday() % len(days) if days else 0
 
     today = days[idx] if idx < len(days) else None
-    return {"day": today, "day_index": idx, "total_days": len(days)}
+    return {"day": today, "day_index": idx, "total_days": len(days), "no_plan": False}
 
 
 @router.get("/history")
