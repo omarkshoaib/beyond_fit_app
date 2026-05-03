@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, col, select
 
 from app.auth.deps import get_current_user, get_db
-from app.models import ClientProfile, PendingApproval, WorkoutHistory
+from app.models import ClientProfile, PendingApproval, RejectionFeedback, WorkoutHistory
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/plans", tags=["plans"])
@@ -33,8 +33,28 @@ def generate_plan(
     user: ClientProfile = Depends(get_current_user),
     session: Session = Depends(get_db),
 ):
-    """Generate a fresh deterministic plan for the authenticated user and persist it."""
+    """Generate a fresh deterministic plan for the authenticated user and persist it.
+
+    Idempotent: if a PendingApproval already exists for this client, returns it
+    rather than creating a second one. Race-safe under concurrent requests.
+    """
     from app.generator import WorkoutGenerator, SafetyRefusalError
+
+    # Idempotency guard: if user has a coach AND a pending approval already
+    # exists, return it instead of creating a duplicate. Prevents concurrent
+    # /generate calls from creating multiple pending rows + double-bumping
+    # week_number.
+    if user.coach_id:
+        existing = session.exec(
+            select(PendingApproval)
+            .where(PendingApproval.client_id == user.client_id)
+        ).first()
+        if existing:
+            return {
+                "status": "pending_approval",
+                "approval_uuid": existing.approval_uuid,
+                "message": "Your coach is reviewing your plan. You'll see it here once approved.",
+            }
 
     # Mark prior active plans as superseded; bump week if regenerating
     prior = session.exec(
@@ -58,13 +78,23 @@ def generate_plan(
         logger.exception("Plan generation failed for client %s", user.client_id)
         raise HTTPException(status_code=500, detail=f"Plan generation failed: {e}")
 
+    # Mark any unconsumed rejection feedback as consumed (regen acknowledges it)
+    unconsumed = session.exec(
+        select(RejectionFeedback)
+        .where(RejectionFeedback.client_id == user.client_id)
+        .where(RejectionFeedback.consumed == False)  # noqa: E712
+    ).all()
+    for r in unconsumed:
+        r.consumed = True
+        session.add(r)
+
     # If client has a coach assigned, route to PendingApproval queue
     if user.coach_id:
         approval_uuid = str(uuid.uuid4())
         pending = PendingApproval(
             approval_uuid=approval_uuid,
             client_id=user.client_id,
-            client_chat_id=0,  # Mobile users have no telegram chat
+            client_chat_id=0,
             client_name=user.name or "Client",
             client_email=user.email or "",
             workout_json=week.model_dump_json(),
@@ -124,10 +154,17 @@ def get_today_session(
         .order_by(col(WorkoutHistory.history_id).desc())
     ).first()
     if not row:
-        # Check if a pending approval exists
         pending = session.exec(
             select(PendingApproval).where(PendingApproval.client_id == user.client_id)
         ).first()
+        # Look up the latest unconsumed rejection feedback for this client.
+        rejection = session.exec(
+            select(RejectionFeedback)
+            .where(RejectionFeedback.client_id == user.client_id)
+            .where(RejectionFeedback.consumed == False)  # noqa: E712
+            .order_by(col(RejectionFeedback.id).desc())
+        ).first()
+
         if pending:
             return {
                 "day": None,
@@ -135,8 +172,17 @@ def get_today_session(
                 "total_days": 0,
                 "no_plan": True,
                 "pending_review": True,
+                "rejection_feedback": None,
             }
-        return {"day": None, "day_index": 0, "total_days": 0, "no_plan": True, "pending_review": False}
+
+        return {
+            "day": None,
+            "day_index": 0,
+            "total_days": 0,
+            "no_plan": True,
+            "pending_review": False,
+            "rejection_feedback": rejection.feedback if rejection else None,
+        }
 
     plan = json.loads(row.workout_json)
     days = plan.get("days", [])

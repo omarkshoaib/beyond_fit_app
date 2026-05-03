@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, col, select
 
 from app.auth.deps import get_current_user, get_db
-from app.models import ClientProfile, PendingApproval, WorkoutHistory
+from app.models import ClientProfile, PendingApproval, RejectionFeedback, WorkoutHistory
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/coach", tags=["coach"])
@@ -36,14 +36,20 @@ def list_clients(
     rows = session.exec(
         select(ClientProfile).where(ClientProfile.coach_id == user.client_id)
     ).all()
+    if not rows:
+        return []
 
-    result = []
-    for c in rows:
-        # Count pending approvals
-        pending_count = len(session.exec(
-            select(PendingApproval).where(PendingApproval.client_id == c.client_id)
-        ).all())
-        result.append({
+    client_ids = [c.client_id for c in rows]
+    # Single query: fetch all pending rows for these clients, then count in Python.
+    pending_rows = session.exec(
+        select(PendingApproval).where(col(PendingApproval.client_id).in_(client_ids))
+    ).all()
+    counts: Dict[str, int] = {}
+    for p in pending_rows:
+        counts[p.client_id] = counts.get(p.client_id, 0) + 1
+
+    return [
+        {
             "client_id": c.client_id,
             "name": c.name,
             "email": c.email,
@@ -51,9 +57,10 @@ def list_clients(
             "training_days": c.training_days,
             "experience_level": c.experience_level,
             "week_number": c.week_number,
-            "pending_count": pending_count,
-        })
-    return result
+            "pending_count": counts.get(c.client_id, 0),
+        }
+        for c in rows
+    ]
 
 
 @router.get("/pending")
@@ -176,7 +183,10 @@ def reject_plan(
     user: ClientProfile = Depends(get_current_user),
     session: Session = Depends(get_db),
 ):
-    """Reject a pending plan with feedback. Plan stays pending; coach can then edit + re-approve via Telegram, or client must regenerate."""
+    """Reject a pending plan with feedback. Removes the pending approval and
+    stores the feedback so the client can see it on their next /today call.
+    Client must then regenerate to try again.
+    """
     _require_coach(user)
     pending = session.get(PendingApproval, approval_uuid)
     if not pending:
@@ -186,15 +196,13 @@ def reject_plan(
     if not client or client.coach_id != user.client_id:
         raise HTTPException(status_code=403, detail="Not your client")
 
-    edits: list = list(pending.edit_log or [])
-    edits.append({
-        "at": datetime.now(timezone.utc).isoformat(),
-        "by": user.client_id,
-        "action": "reject",
-        "feedback": body.feedback,
-    })
-    pending.edit_log = edits
-    session.add(pending)
+    feedback_row = RejectionFeedback(
+        client_id=pending.client_id,
+        feedback=body.feedback,
+        created_at=datetime.now(timezone.utc),
+    )
+    session.add(feedback_row)
+    session.delete(pending)
     session.commit()
 
-    return {"ok": True, "feedback_logged": True}
+    return {"ok": True, "feedback_stored": True}

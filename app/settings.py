@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     # ── Auth ────────────────────────────────────────────────────────
     auth_secret_key: str = "change-me-in-production"
 
+    # ── CORS ────────────────────────────────────────────────────────
+    # Comma-separated list of allowed origins. Default "*" = open (dev only).
+    # Production: set CORS_ALLOWED_ORIGINS=https://app.example.com,https://www.example.com
+    cors_allowed_origins: str = "*"
+
     # ── Feature flags ───────────────────────────────────────────────
     feature_nutrition_enabled: bool = False
 

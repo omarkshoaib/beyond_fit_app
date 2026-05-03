@@ -361,3 +361,118 @@ def test_coach_admin_full_flow(test_engine):
     assert no_coach.status_code == 403
 
     fastapi_app.dependency_overrides.clear()
+
+
+def test_idempotent_generate_when_pending_exists(test_engine):
+    """Calling /plans/generate twice with a coach assigned must not create
+    duplicate PendingApproval rows or double-bump week_number."""
+    from app.main import app as fastapi_app
+    from sqlmodel import Session
+    from app.auth.deps import get_db
+    from app.models import ClientProfile, PendingApproval
+
+    def _override_db():
+        with Session(test_engine) as s:
+            yield s
+
+    fastapi_app.dependency_overrides[get_db] = _override_db
+    c = TestClient(fastapi_app)
+
+    coach_reg = c.post("/api/v1/auth/register",
+                      json={"email": "coach2@bf.com", "password": "Pass12345", "name": "Coach2"})
+    client_reg = c.post("/api/v1/auth/register",
+                       json={"email": "client2@bf.com", "password": "Pass12345", "name": "Client2"})
+
+    coach_h = {"Authorization": f"Bearer {coach_reg.json()['access_token']}"}  # noqa: F841
+    client_h = {"Authorization": f"Bearer {client_reg.json()['access_token']}"}
+
+    client_id_str = ""
+    with Session(test_engine) as s:
+        coach = s.exec(select(ClientProfile).where(ClientProfile.email == "coach2@bf.com")).first()
+        client = s.exec(select(ClientProfile).where(ClientProfile.email == "client2@bf.com")).first()
+        assert coach is not None and client is not None
+        coach.is_coach = True
+        client.coach_id = coach.client_id
+        client_id_str = client.client_id
+        s.add(coach)
+        s.add(client)
+        s.commit()
+
+    c.put("/api/v1/profile", headers=client_h, json={
+        "training_days": 3, "experience_level": "beginner",
+        "available_equipment": ["full_gym"], "limitations": [],
+    })
+
+    g1 = c.post("/api/v1/plans/generate", headers=client_h)
+    g2 = c.post("/api/v1/plans/generate", headers=client_h)
+    assert g1.status_code == 200
+    assert g2.status_code == 200
+    assert g1.json()["approval_uuid"] == g2.json()["approval_uuid"]
+
+    with Session(test_engine) as s:
+        pending = s.exec(
+            select(PendingApproval).where(PendingApproval.client_id == client_id_str)
+        ).all()
+        assert len(pending) == 1
+
+    fastapi_app.dependency_overrides.clear()
+
+
+def test_rejection_surfaces_feedback_to_client(test_engine):
+    """When coach rejects, client's /today should expose the feedback string."""
+    from app.main import app as fastapi_app
+    from sqlmodel import Session
+    from app.auth.deps import get_db
+    from app.models import ClientProfile
+
+    def _override_db():
+        with Session(test_engine) as s:
+            yield s
+
+    fastapi_app.dependency_overrides[get_db] = _override_db
+    c = TestClient(fastapi_app)
+
+    coach_reg = c.post("/api/v1/auth/register",
+                      json={"email": "coach3@bf.com", "password": "Pass12345", "name": "Coach3"})
+    client_reg = c.post("/api/v1/auth/register",
+                       json={"email": "client3@bf.com", "password": "Pass12345", "name": "Client3"})
+
+    coach_h = {"Authorization": f"Bearer {coach_reg.json()['access_token']}"}
+    client_h = {"Authorization": f"Bearer {client_reg.json()['access_token']}"}
+
+    with Session(test_engine) as s:
+        coach = s.exec(select(ClientProfile).where(ClientProfile.email == "coach3@bf.com")).first()
+        client = s.exec(select(ClientProfile).where(ClientProfile.email == "client3@bf.com")).first()
+        assert coach is not None and client is not None
+        coach.is_coach = True
+        client.coach_id = coach.client_id
+        s.add(coach)
+        s.add(client)
+        s.commit()
+
+    c.put("/api/v1/profile", headers=client_h, json={
+        "training_days": 3, "experience_level": "beginner",
+        "available_equipment": ["full_gym"], "limitations": [],
+    })
+
+    gen = c.post("/api/v1/plans/generate", headers=client_h)
+    approval_uuid = gen.json()["approval_uuid"]
+
+    # Coach rejects with feedback
+    rej = c.post(f"/api/v1/coach/reject/{approval_uuid}", headers=coach_h,
+                 json={"feedback": "Too much volume on day 2"})
+    assert rej.status_code == 200, rej.text
+
+    # Client's /today now shows rejection feedback (and pending_review = false)
+    today = c.get("/api/v1/plans/today", headers=client_h)
+    data = today.json()
+    assert data["pending_review"] is False
+    assert data["rejection_feedback"] == "Too much volume on day 2"
+
+    # Client regenerates → feedback consumed → next /today no longer shows it
+    c.post("/api/v1/plans/generate", headers=client_h)
+    today2 = c.get("/api/v1/plans/today", headers=client_h)
+    assert today2.json()["pending_review"] is True
+    assert today2.json().get("rejection_feedback") is None
+
+    fastapi_app.dependency_overrides.clear()

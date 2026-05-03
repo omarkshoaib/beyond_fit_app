@@ -75,6 +75,16 @@ class PendingApproval(SQLModel, table=True):
     cancelled_at: Optional[datetime] = Field(default=None)
 
 
+class RejectionFeedback(SQLModel, table=True):
+    """Coach-rejection messages, kept after PendingApproval is deleted so clients
+    can read why their plan was rejected on the next /plans/today call."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    client_id: str = Field(index=True)
+    feedback: str
+    created_at: Optional[datetime] = Field(default=None)
+    consumed: bool = Field(default=False)
+
+
 class WorkoutHistory(SQLModel, table=True):
     """Versioned workout plan record. Statuses: draft|pending|approved|rejected|active|superseded."""
     history_id: Optional[int] = Field(default=None, primary_key=True)

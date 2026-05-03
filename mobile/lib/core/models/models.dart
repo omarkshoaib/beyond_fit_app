@@ -144,6 +144,7 @@ class TodaySession {
   final int totalDays;
   final bool noPlan;
   final bool pendingReview;
+  final String? rejectionFeedback;
 
   const TodaySession({
     this.day,
@@ -151,6 +152,7 @@ class TodaySession {
     required this.totalDays,
     this.noPlan = false,
     this.pendingReview = false,
+    this.rejectionFeedback,
   });
 
   factory TodaySession.fromJson(Map<String, dynamic> j) => TodaySession(
@@ -159,6 +161,7 @@ class TodaySession {
         totalDays: j['total_days'] as int? ?? 0,
         noPlan: j['no_plan'] as bool? ?? false,
         pendingReview: j['pending_review'] as bool? ?? false,
+        rejectionFeedback: j['rejection_feedback'] as String?,
       );
 
   String get dayName => day?['day_name'] as String? ?? 'Rest Day';

@@ -38,11 +38,16 @@ async def lifespan(app: FastAPI):
 def get_app() -> FastAPI:
     app = FastAPI(title="Deterministic Coaching Engine", lifespan=lifespan)
 
+    cors = get_settings().cors_allowed_origins
+    origins = ["*"] if cors.strip() == "*" else [o.strip() for o in cors.split(",") if o.strip()]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=origins,
         allow_methods=["*"],
         allow_headers=["*"],
+        # Note: allow_credentials stays False so wildcard origin is safe.
+        # If you flip this to True, allow_origins MUST be an explicit list.
+        allow_credentials=False,
     )
 
     @app.get("/")

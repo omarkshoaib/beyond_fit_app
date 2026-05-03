@@ -135,6 +135,18 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
+    if (_today?.rejectionFeedback != null && _today!.rejectionFeedback!.isNotEmpty) {
+      return FriendlyState(
+        icon: Icons.feedback_outlined,
+        title: 'Coach feedback',
+        message:
+            '"${_today!.rejectionFeedback}"\n\nGenerate a new plan to apply your coach\'s feedback.',
+        actionLabel: _generating ? 'Generating…' : 'Generate New Plan',
+        onAction: _generating ? null : _generateFirstPlan,
+        iconColor: Colors.amber,
+      );
+    }
+
     if (_today?.noPlan == true) {
       return FriendlyState(
         icon: Icons.flag_outlined,
