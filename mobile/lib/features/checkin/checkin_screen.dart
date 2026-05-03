@@ -137,10 +137,11 @@ class _CheckinScreenState extends State<CheckinScreen> {
                     ..._mainSlots.asMap().entries.map((e) {
                       final idx = e.value['_idx'] as int;
                       final name = (e.value['exercise'] as Map?)?['name'] ?? 'Exercise';
+                      final rpeRaw = e.value['rpe'];
                       return _LiftEntry(
                         name: name as String,
                         targetWeight: e.value['target_weight'] as num?,
-                        targetRpe: e.value['rpe'] as int?,
+                        targetRpe: rpeRaw is num ? rpeRaw.toInt() : null,
                         weightCtrl: _weightCtrl[idx]!,
                         rpeCtrl: _rpeCtrl[idx]!,
                       );

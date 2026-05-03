@@ -60,10 +60,10 @@ class _SlotCard extends StatelessWidget {
     final theme = Theme.of(context);
     final exercise = slot['exercise'] as Map<String, dynamic>? ?? {};
     final name = exercise['name'] as String? ?? 'Exercise ${index + 1}';
-    final sets = slot['sets'] as int? ?? 0;
-    final reps = slot['reps'] as int? ?? 0;
+    final sets = slot['sets']?.toString() ?? '0';
+    final reps = slot['reps']?.toString() ?? '0';
     final weight = slot['target_weight'] as num?;
-    final rpe = slot['rpe'] as int?;
+    final rpe = slot['rpe'];
     final slotType = slot['slot_type'] as String? ?? '';
 
     return Card(
