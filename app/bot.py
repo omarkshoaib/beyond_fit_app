@@ -436,6 +436,16 @@ async def start_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 )
                 return ConversationHandler.END
             else:
+                # Profile exists with no history (interrupted onboarding).
+                # Wipe child rows first — FKs aren't ON DELETE CASCADE.
+                for snap in session.exec(
+                    select(ProfileSnapshot).where(ProfileSnapshot.client_id == client_id)
+                ).all():
+                    session.delete(snap)
+                for pend in session.exec(
+                    select(PendingApproval).where(PendingApproval.client_id == client_id)
+                ).all():
+                    session.delete(pend)
                 session.delete(client)
                 session.commit()
 
