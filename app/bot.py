@@ -2921,8 +2921,8 @@ _CLIENT_HELP = (
 _ADMIN_HELP = (
     "/review — pending plan approvals\n"
     "/review_batch — group pending plans by training type\n"
-    "/override <client_id> <from_id> <to_id> — substitute an exercise\n"
-    "/override <client_id> — list/remove overrides\n"
+    "/override &lt;client_id&gt; &lt;from_id&gt; &lt;to_id&gt; — substitute an exercise\n"
+    "/override &lt;client_id&gt; — list/remove overrides\n"
     "/help — this message"
 )
 
