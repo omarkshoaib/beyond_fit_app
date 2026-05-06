@@ -46,6 +46,23 @@ logging.basicConfig(
 )
 
 
+def _admin_chat_id() -> int | None:
+    """Resolve the admin Telegram chat ID.
+
+    Reads ADMIN_CHAT_ID (current canonical name) first, falls back to the
+    legacy variable name. Returns None if neither is set so callers can
+    decide whether to no-op or raise.
+    """
+    raw = os.getenv("ADMIN_CHAT_ID") or os.getenv("ADMIN_TELEGRAM_ID")
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        logging.error("ADMIN_CHAT_ID must be an integer chat id, got %r", raw)
+        return None
+
+
 def _strip_markdown(text: str) -> str:
     """Remove Markdown formatting to produce safe plain text for Telegram."""
     import re
@@ -334,8 +351,8 @@ async def run_generation_and_dispatch(
             session.add(pending)
             session.commit()
 
-        admin_chat_id = os.getenv("ADMIN_TELEGRAM_ID")
-        if admin_chat_id:
+        admin_chat_id = _admin_chat_id()
+        if admin_chat_id is not None:
             keyboard = [[
                 InlineKeyboardButton("✅ Approve", callback_data=f"approve:{approval_id}"),
                 InlineKeyboardButton("❌ Reject", callback_data=f"reject:{approval_id}"),
@@ -372,8 +389,8 @@ async def run_generation_and_dispatch(
             )
 
     except SafetyRefusalError as e:
-        admin_id = os.getenv("ADMIN_TELEGRAM_ID")
-        if admin_id:
+        admin_id = _admin_chat_id()
+        if admin_id is not None:
             clearance_kb = InlineKeyboardMarkup([[
                 InlineKeyboardButton(
                     "✅ Mark cleared by physician",
@@ -381,7 +398,7 @@ async def run_generation_and_dispatch(
                 )
             ]])
             await context.bot.send_message(
-                chat_id=int(admin_id),
+                chat_id=admin_id,
                 text=(
                     f"⚠️ Safety gate triggered for {client_first_name} ({client_user_id})\n"
                     f"Condition: {e.condition_key}\nReason: {e.reason}"
@@ -1094,8 +1111,8 @@ async def _process_checkin(
             delta_notes_text = "\n".join(f"• {n}" for n in delta.notes)
 
     # Send single combined check-in message to admin
-    admin_chat_id = os.getenv("ADMIN_TELEGRAM_ID")
-    if admin_chat_id:
+    admin_chat_id = _admin_chat_id()
+    if admin_chat_id is not None:
         summary = _build_client_summary(client_id)
 
         try:
@@ -1199,8 +1216,8 @@ async def handle_post_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def handle_updates_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    admin_chat_id = os.getenv("ADMIN_TELEGRAM_ID")
-    if admin_chat_id:
+    admin_chat_id = _admin_chat_id()
+    if admin_chat_id is not None:
         summary = _build_client_summary(str(update.effective_user.id))
         admin_text = (
             f"📬 *Message from client*\n\n"
@@ -1312,8 +1329,8 @@ async def handle_formcheck_mode(update: Update, context: ContextTypes.DEFAULT_TY
             "tips": tips,
         }
 
-        admin_chat_id = os.getenv("ADMIN_TELEGRAM_ID")
-        if admin_chat_id:
+        admin_chat_id = _admin_chat_id()
+        if admin_chat_id is not None:
             keyboard = [[
                 InlineKeyboardButton("✅ Send to client", callback_data=f"fc_confirm_{tip_uuid}"),
                 InlineKeyboardButton("✏️ Edit reply", callback_data=f"fc_edit_{tip_uuid}"),
@@ -1350,13 +1367,13 @@ async def handle_formcheck_mode(update: Update, context: ContextTypes.DEFAULT_TY
 async def handle_formcheck_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     ex_name = context.user_data.get("formcheck_exercise_name", "exercise")
     client_id = str(update.effective_user.id)
-    admin_chat_id = os.getenv("ADMIN_TELEGRAM_ID")
+    admin_chat_id = _admin_chat_id()
 
     if not update.message.video and not update.message.document:
         await update.message.reply_text("Please send a video file. Try again or /cancel.")
         return FORMCHECK_VIDEO
 
-    if not admin_chat_id:
+    if admin_chat_id is None:
         await update.message.reply_text("Could not reach your coach right now. Try again later.")
         return ConversationHandler.END
 
@@ -1752,8 +1769,8 @@ async def _submit_nutrition(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             )
             return ConversationHandler.END
 
-    admin_chat_id = os.getenv("ADMIN_TELEGRAM_ID")
-    if admin_chat_id:
+    admin_chat_id = _admin_chat_id()
+    if admin_chat_id is not None:
         keyboard = [[
             InlineKeyboardButton("✅ Activate plan", callback_data=f"nutrapprove:{plan.id}"),
             InlineKeyboardButton("❌ Discard", callback_data=f"nutrdiscard:{plan.id}"),
@@ -2344,8 +2361,8 @@ async def handle_plan_full_week(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def admin_review(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show index card of all pending approvals; admin taps [Open] to expand each one."""
-    admin_id = os.getenv("ADMIN_TELEGRAM_ID")
-    if not admin_id or str(update.effective_user.id) != str(admin_id):
+    admin_id = _admin_chat_id()
+    if admin_id is None or update.effective_user.id != admin_id:
         return
 
     with Session(engine) as session:
@@ -2453,8 +2470,8 @@ async def handle_open_pending_item(update: Update, context: ContextTypes.DEFAULT
 
 async def admin_review_batch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/review_batch — groups pending plans by avatar+days bucket for efficient batch review."""
-    admin_id = os.getenv("ADMIN_TELEGRAM_ID")
-    if not admin_id or str(update.effective_user.id) != str(admin_id):
+    admin_id = _admin_chat_id()
+    if admin_id is None or update.effective_user.id != admin_id:
         return
 
     with Session(engine) as session:
@@ -2543,15 +2560,15 @@ async def handle_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> No
     sig = hashlib.md5(str(context.error)[:200].encode()).hexdigest()
     now = time.monotonic()
     short_tb = tb[-3000:] if len(tb) > 3000 else tb
-    admin_id = os.getenv("ADMIN_TELEGRAM_ID")
+    admin_id = _admin_chat_id()
 
     if sig in _error_last_sent and now - _error_last_sent[sig] < 300:
         _error_counts[sig] = _error_counts.get(sig, 1) + 1
         msg_id = _error_message_ids.get(sig)
-        if admin_id and msg_id:
+        if admin_id is not None and msg_id:
             try:
                 await context.bot.edit_message_text(
-                    chat_id=int(admin_id),
+                    chat_id=admin_id,
                     message_id=msg_id,
                     text=f"⚠️ Bot error (×{_error_counts[sig]}):\n```\n{short_tb}\n```",
                     parse_mode="Markdown",
@@ -2564,10 +2581,10 @@ async def handle_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> No
     _error_counts[sig] = 1
     _prune_old_entries(_error_last_sent, _error_message_ids, _error_counts)
 
-    if admin_id:
+    if admin_id is not None:
         try:
             sent = await context.bot.send_message(
-                chat_id=int(admin_id),
+                chat_id=admin_id,
                 text=f"⚠️ Bot error:\n```\n{short_tb}\n```",
                 parse_mode="Markdown",
             )
@@ -2756,8 +2773,8 @@ async def handle_plan_ack(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 async def handle_override(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/override [client_id] [from_id] [to_id] — set, list, or remove exercise overrides."""
-    admin_id = os.getenv("ADMIN_TELEGRAM_ID")
-    if not admin_id or str(update.effective_user.id) != str(admin_id):
+    admin_id = _admin_chat_id()
+    if admin_id is None or update.effective_user.id != admin_id:
         return
 
     args = context.args or []
@@ -2885,8 +2902,8 @@ _ADMIN_HELP = (
 
 
 async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    admin_id = os.getenv("ADMIN_TELEGRAM_ID")
-    is_admin = admin_id and str(update.effective_user.id) == str(admin_id)
+    admin_id = _admin_chat_id()
+    is_admin = admin_id is not None and update.effective_user.id == admin_id
     text = f"*Client commands:*\n{_CLIENT_HELP}"
     if is_admin:
         text += f"\n\n*Admin commands:*\n{_ADMIN_HELP}"
@@ -2901,9 +2918,9 @@ def main():
         logging.error("No TELEGRAM_BOT_TOKEN found.")
         return
 
-    admin_id = os.getenv("ADMIN_TELEGRAM_ID")
-    if not admin_id:
-        logging.error("ADMIN_TELEGRAM_ID not set — admin commands will not work")
+    admin_id = _admin_chat_id()
+    if admin_id is None:
+        logging.error("ADMIN_CHAT_ID not set — admin commands will not work")
 
     create_db_and_tables()
     app = ApplicationBuilder().token(token).build()
@@ -3084,10 +3101,10 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_safety_clear, pattern=r"^safety_clear:"))
 
     # Route admin replies to form-check videos back to clients
-    admin_chat_id = os.getenv("ADMIN_TELEGRAM_ID")
-    if admin_chat_id:
+    admin_chat_id = _admin_chat_id()
+    if admin_chat_id is not None:
         app.add_handler(MessageHandler(
-            filters.Chat(int(admin_chat_id)) & filters.REPLY & filters.TEXT,
+            filters.Chat(admin_chat_id) & filters.REPLY & filters.TEXT,
             handle_admin_video_reply,
         ))
 
