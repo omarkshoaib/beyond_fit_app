@@ -2904,10 +2904,10 @@ _ADMIN_HELP = (
 async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     admin_id = _admin_chat_id()
     is_admin = admin_id is not None and update.effective_user.id == admin_id
-    text = f"*Client commands:*\n{_CLIENT_HELP}"
+    text = f"<b>Client commands:</b>\n{_CLIENT_HELP}"
     if is_admin:
-        text += f"\n\n*Admin commands:*\n{_ADMIN_HELP}"
-    await update.message.reply_text(text, parse_mode="Markdown")
+        text += f"\n\n<b>Admin commands:</b>\n{_ADMIN_HELP}"
+    await update.message.reply_text(text, parse_mode="HTML")
 
 
 # ── MAIN ───────────────────────────────────────────────────────────────────────
