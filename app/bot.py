@@ -2022,10 +2022,23 @@ async def handle_admin_approve(update: Update, context: ContextTypes.DEFAULT_TYP
     )
 
 
-def _format_plan_summary(workout):
-    # Stub: replaced in Task 2. Returns a minimal non-empty string so the
-    # inline-summary send path is exercised; Task 2 builds the real summary.
-    return "Your plan is ready."
+def _format_plan_summary(workout: WorkoutWeek) -> str:
+    """Compact text summary of a workout week.
+
+    Sent as a Telegram message alongside the PDF so the client sees the plan
+    inline without opening the PDF on a small screen.
+    """
+    lines = [f"📋 *Week {workout.week_number}* — {len(workout.days)} day(s)"]
+    if not workout.days:
+        return "\n".join(lines)
+    for day in workout.days:
+        lines.append("")
+        lines.append(f"*{day.day_name}*")
+        for slot in day.slots:
+            lines.append(
+                f"• {slot.exercise_name} — {slot.sets}×{slot.reps} @ RPE {slot.rpe}"
+            )
+    return "\n".join(lines)
 
 
 # ── DB helper extraction (added for bot-only refactor) ────────────────────
