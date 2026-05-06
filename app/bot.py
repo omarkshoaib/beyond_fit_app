@@ -26,7 +26,6 @@ from pathlib import Path
 from app.generator import WorkoutGenerator, SafetyRefusalError
 from app.services.llm_service import FlashCommunicationService
 from app.services.pdf_service import PdfService
-from app.services.email_service import EmailService
 from app.adapters.pdf.renderer import render_plan_pdf
 from datetime import datetime, timezone
 

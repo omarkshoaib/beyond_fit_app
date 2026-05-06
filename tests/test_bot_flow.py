@@ -54,7 +54,6 @@ _BASE_PROFILE = dict(
 _PATCHES = [
     patch("app.bot.FlashCommunicationService.generate_coaching_message", return_value="Test coaching message"),
     patch("app.bot.FlashCommunicationService.apply_coach_edits", side_effect=lambda j, _: j),
-    patch("app.bot.EmailService.send_plan", return_value=True),
     patch("app.bot.render_plan_pdf", side_effect=lambda client, out_path, **kw: out_path.write_bytes(b"PDF")),
     patch("app.bot.render_digest", return_value="digest"),
     patch("os.getenv", side_effect=lambda k, *a: ADMIN_ID if k == "ADMIN_TELEGRAM_ID" else (a[0] if a else None)),

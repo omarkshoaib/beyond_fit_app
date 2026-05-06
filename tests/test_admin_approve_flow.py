@@ -74,7 +74,7 @@ async def test_approve_sends_pdf_and_does_not_email(monkeypatch):
     monkeypatch.setattr(bot_module, "_safe_render_pdf",
                         lambda profile, pending: b"%PDF-fake")
     finalise_called = {"value": False}
-    def _finalise_spy(pending_arg, _ctx_session=None):
+    def _finalise_spy(pending_arg):
         finalise_called["value"] = True
     monkeypatch.setattr(bot_module, "_atomic_finalise_history", _finalise_spy)
 
