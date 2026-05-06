@@ -30,7 +30,7 @@ from app.adapters.pdf.renderer import render_plan_pdf
 from datetime import datetime, timezone
 
 from app.models import (
-    ClientProfile, WorkoutWeek, PendingApproval, WorkoutHistory, ProfileSnapshot,
+    ClientProfile, WorkoutWeek, WorkoutSlot, PendingApproval, WorkoutHistory, ProfileSnapshot,
     NutritionProfile, NutritionPlan, CheckIn,
 )
 from app.database import engine, create_db_and_tables
@@ -299,7 +299,7 @@ async def run_generation_and_dispatch(
         if prior_workout:
             for d in prior_workout.days:
                 for past_slot in d.slots:
-                    if past_slot.actual_weight and past_slot.slot_type in ("main_compound", "main_lift"):
+                    if past_slot.actual_weight and past_slot.slot_type == "main_compound":
                         for nd in new_workout.days:
                             for n_slot in nd.slots:
                                 if n_slot.exercise_id == past_slot.exercise_id and n_slot.target_weight:
@@ -725,19 +725,14 @@ async def start_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         slot.exercise_name
         for day in week.days
         for slot in day.slots
-        if slot.slot_type in ("main_compound", "secondary_compound", "main_lift")
+        if slot.slot_type in ("main_compound", "secondary_compound")
     ]
     context.user_data["checkin_prior_profile"] = (
         client.model_dump_json(indent=2) if client else ""
     )
 
     # Collect main_compound slots for structured mode; skip already-logged ones
-    all_main_slots = [
-        (day.day_name, slot)
-        for day in week.days
-        for slot in day.slots
-        if slot.slot_type in ("main_compound", "main_lift")
-    ]
+    all_main_slots = _select_checkin_slots(week)
     already_logged = [(d, s) for d, s in all_main_slots if s.actual_rpe is not None]
     main_slots = [(d, s) for d, s in all_main_slots if s.actual_rpe is None]
 
@@ -2020,6 +2015,21 @@ async def handle_admin_approve(update: Update, context: ContextTypes.DEFAULT_TYP
         parse_mode="Markdown",
         reply_markup=keyboard,
     )
+
+
+def _select_checkin_slots(week: WorkoutWeek) -> list[tuple[str, WorkoutSlot]]:
+    """Returns (day_name, slot) tuples for all main_compound slots in the week.
+
+    Single source of truth for the /checkin loop. The generator only sets
+    slot_type='main_compound'; a previously-accepted dead literal that never
+    matched anything has been removed.
+    """
+    return [
+        (day.day_name, slot)
+        for day in week.days
+        for slot in day.slots
+        if slot.slot_type == "main_compound"
+    ]
 
 
 def _format_plan_summary(workout: WorkoutWeek) -> str:
