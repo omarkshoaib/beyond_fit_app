@@ -2143,19 +2143,35 @@ def _atomic_finalise_history(pending: PendingApproval) -> None:
         session.commit()
 
 
+async def _safe_edit(query, text: str) -> None:
+    """edit_message_text that swallows the 'Message is not modified' 400.
+
+    Telegram raises BadRequest when the new text+markup are identical to
+    the current ones. That happens on double-click of the approve button
+    or when the same status text gets re-emitted. Harmless; ignore.
+    """
+    from telegram.error import BadRequest
+    try:
+        await query.edit_message_text(text)
+    except BadRequest as e:
+        if "not modified" in str(e).lower():
+            return
+        raise
+
+
 async def _do_approve_confirmed(query, approval_id: str, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Shared approval logic called by both the direct and confirmation-step paths."""
     pending, profile = _load_pending_and_profile(approval_id)
     if pending is None:
-        await query.edit_message_text("❌ Plan no longer pending.")
+        await _safe_edit(query, "❌ Plan no longer pending.")
         return
     if profile is None:
         logging.warning("client_not_found: %s", pending.client_id)
-        await query.edit_message_text("❌ Client profile not found — cannot approve.")
+        await _safe_edit(query, "❌ Client profile not found — cannot approve.")
         return
 
     client_name = pending.client_name or pending.client_id
-    await query.edit_message_text(f"Generating PDF for {client_name}...")
+    await _safe_edit(query, f"Generating PDF for {client_name}...")
 
     workout = WorkoutWeek.model_validate_json(pending.workout_json)
 
@@ -2181,7 +2197,7 @@ async def _do_approve_confirmed(query, approval_id: str, context: ContextTypes.D
 
     _atomic_finalise_history(pending)
 
-    await query.edit_message_text(f"✅ Approved. PDF sent to {client_name} via Telegram!")
+    await _safe_edit(query, f"✅ Approved. PDF sent to {client_name} via Telegram!")
 
 
 async def handle_admin_approve_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
