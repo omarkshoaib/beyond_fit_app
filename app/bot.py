@@ -2023,28 +2023,31 @@ async def handle_admin_approve(update: Update, context: ContextTypes.DEFAULT_TYP
     )
 
 
-async def _do_approve_confirmed(query, approval_id: str, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Shared approval logic called by both the direct and confirmation-step paths."""
+def _format_plan_summary(workout):
+    # Stub: replaced in Task 2. Returns a minimal non-empty string so the
+    # inline-summary send path is exercised; Task 2 builds the real summary.
+    return "Your plan is ready."
+
+
+# ── DB helper extraction (added for bot-only refactor) ────────────────────
+def _load_pending_and_profile(approval_id: str):
+    """Read PendingApproval + its ClientProfile in one session.
+
+    Returns (pending, profile) or (None, None) if either is missing.
+    """
     with Session(engine) as session:
         pending = session.get(PendingApproval, approval_id)
         if not pending:
-            await query.edit_message_text("❌ Plan no longer pending.")
-            return
-
-        client_name = pending.client_name or pending.client_id
-        await query.edit_message_text(f"Generating PDF for {client_name}...")
-
-        workout = WorkoutWeek.model_validate_json(pending.workout_json)
+            return None, None
         profile = session.get(ClientProfile, pending.client_id)
-        if profile is None:
-            logging.warning("client_not_found: %s", pending.client_id)
-            await query.edit_message_text("❌ Client profile not found — cannot approve.")
-            return
+        return pending, profile
 
-    # ── 1. Render PDF (outside transaction — safe to fail and retry) ──────────
+
+def _safe_render_pdf(profile: ClientProfile, pending: PendingApproval) -> bytes:
+    """Render the professional PDF; on failure, fall back to Markdown→PDF."""
     transient_history = WorkoutHistory(
         client_id=pending.client_id,
-        week_number=workout.week_number,
+        week_number=WorkoutWeek.model_validate_json(pending.workout_json).week_number,
         workout_json=pending.workout_json,
         status="active",
     )
@@ -2057,30 +2060,14 @@ async def _do_approve_confirmed(query, approval_id: str, context: ContextTypes.D
                 workout_history=transient_history,
                 draft_watermark=False,
             )
-            pdf_bytes = pdf_path.read_bytes()
+            return pdf_path.read_bytes()
     except Exception as err:
         logging.warning("Professional PDF render failed (%s), falling back", err)
-        pdf_bytes = PdfService.generate_pdf(pending.coaching_message)
+        return PdfService.generate_pdf(pending.coaching_message)
 
-    # ── 2. Deliver to client (outside transaction) ─────────────────────────────
-    await context.bot.send_document(
-        chat_id=pending.client_chat_id,
-        document=pdf_bytes,
-        filename=f"workout_plan_week{workout.week_number}.pdf",
-        caption="🎉 Coach Shoaib has approved your plan! Here's your PDF 💪",
-    )
-    try:
-        email_service = EmailService()
-        email_service.send_plan(
-            to_email=pending.client_email,
-            client_name=client_name,
-            pdf_bytes=pdf_bytes,
-            week_number=workout.week_number,
-        )
-    except Exception as email_err:
-        logging.warning("Email delivery failed (non-fatal): %s", email_err)
 
-    # ── 3. Single atomic DB transaction ────────────────────────────────────────
+def _atomic_finalise_history(pending: PendingApproval) -> None:
+    """Supersede old active plan, insert new active, delete pending. One transaction."""
     now = datetime.now(timezone.utc)
     with Session(engine) as session:
         for old in session.exec(
@@ -2094,17 +2081,56 @@ async def _do_approve_confirmed(query, approval_id: str, context: ContextTypes.D
 
         new_history = WorkoutHistory(
             client_id=pending.client_id,
-            week_number=workout.week_number,
+            week_number=WorkoutWeek.model_validate_json(pending.workout_json).week_number,
             workout_json=pending.workout_json,
             status="active",
             plan_started_at=now,
         )
         session.add(new_history)
 
-        stale_pending = session.get(PendingApproval, approval_id)
+        stale_pending = session.get(PendingApproval, pending.approval_uuid)
         if stale_pending:
             session.delete(stale_pending)
         session.commit()
+
+
+async def _do_approve_confirmed(query, approval_id: str, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Shared approval logic called by both the direct and confirmation-step paths."""
+    pending, profile = _load_pending_and_profile(approval_id)
+    if pending is None:
+        await query.edit_message_text("❌ Plan no longer pending.")
+        return
+    if profile is None:
+        logging.warning("client_not_found: %s", pending.client_id)
+        await query.edit_message_text("❌ Client profile not found — cannot approve.")
+        return
+
+    client_name = pending.client_name or pending.client_id
+    await query.edit_message_text(f"Generating PDF for {client_name}...")
+
+    workout = WorkoutWeek.model_validate_json(pending.workout_json)
+
+    pdf_bytes = _safe_render_pdf(profile, pending)
+
+    await context.bot.send_document(
+        chat_id=pending.client_chat_id,
+        document=pdf_bytes,
+        filename=f"workout_plan_week{workout.week_number}.pdf",
+        caption="🎉 Coach Shoaib has approved your plan! Here's your PDF 💪",
+    )
+
+    summary = _format_plan_summary(workout)
+    if summary:
+        try:
+            await context.bot.send_message(
+                chat_id=pending.client_chat_id,
+                text=summary,
+                parse_mode="Markdown",
+            )
+        except Exception as send_err:
+            logging.warning("Inline summary send failed (non-fatal): %s", send_err)
+
+    _atomic_finalise_history(pending)
 
     await query.edit_message_text(f"✅ Approved. PDF sent to {client_name} via Telegram!")
 
