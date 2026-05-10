@@ -27,13 +27,16 @@ from app.generator import WorkoutGenerator, SafetyRefusalError
 from app.services.llm_service import FlashCommunicationService
 from app.services.pdf_service import PdfService
 from app.adapters.pdf.renderer import render_plan_pdf
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.models import (
     ClientProfile, WorkoutWeek, WorkoutSlot, PendingApproval, WorkoutHistory, ProfileSnapshot,
     NutritionProfile, NutritionPlan, CheckIn,
+    AccessCode, Payment, Subscription, ChatBinding,
 )
 from app.database import engine, create_db_and_tables
+from app.auth import roles as auth_roles
+from app.settings import get_settings
 from app.adapters.llm.extractors import extract_checkin, render_digest
 from app.adapters.llm.openrouter import OpenRouterClient
 from app.domain.workout.autoregulation import derive_plan_delta, apply_delta
@@ -116,6 +119,34 @@ FORMCHECK_TIPS_CONFIRM = 101
 (
     LOG_SELECT_DAY, LOG_SELECT_EXERCISE, LOG_WEIGHT, LOG_RPE,
 ) = ["LOG_SELECT_DAY", "LOG_SELECT_EXERCISE", "LOG_WEIGHT", "LOG_RPE"]
+
+# ── Pre-payment funnel states ──────────────────────────────────────────────────
+(
+    MENU_ROOT, SUBSCRIBE_PICK_PLAN, SUBSCRIBE_AWAIT_SCREENSHOT,
+    LOGIN_AWAIT_CODE, FAQ_LOOP, PAY_REJECT_REASON,
+) = ["MENU_ROOT", "SUBSCRIBE_PICK_PLAN", "SUBSCRIBE_AWAIT_SCREENSHOT",
+     "LOGIN_AWAIT_CODE", "FAQ_LOOP", "PAY_REJECT_REASON"]
+
+
+# ── FAQ rate limiter (5 questions / chat / hour) ───────────────────────────────
+# Maps chat_id → list of monotonic timestamps within the rolling window.
+_faq_recent_calls: dict[int, list[float]] = defaultdict(list)
+
+
+def _faq_rate_check(chat_id: int) -> bool:
+    """Return True if the chat is allowed another FAQ call. Side effect: records the call."""
+    settings = get_settings()
+    limit = max(1, settings.faq_rate_limit_per_hour)
+    window_seconds = 3600.0
+    now = time.monotonic()
+    bucket = _faq_recent_calls[chat_id]
+    # Drop expired timestamps.
+    bucket[:] = [t for t in bucket if now - t < window_seconds]
+    if len(bucket) >= limit:
+        return False
+    bucket.append(now)
+    return True
+
 
 # ── Nutrition intake states ────────────────────────────────────────────────────
 (
@@ -421,33 +452,305 @@ async def run_generation_and_dispatch(
 # ── CLIENT INTAKE FLOW ─────────────────────────────────────────────────────────
 
 async def start_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    client_id = str(update.effective_user.id)
+    """Entry point for /start. Dispatches by chat-binding status:
+
+      - Bound chat → "Welcome back" (legacy).
+      - Unbound chat → 3-button pre-payment menu.
+    """
+    chat_id = update.effective_chat.id
+    client = auth_roles.get_authenticated_client(chat_id)
+
+    if client is not None:
+        # Returning client (any device bound to this chat).
+        with Session(engine, expire_on_commit=False) as session:
+            has_history = session.exec(
+                select(WorkoutHistory).where(WorkoutHistory.client_id == client.client_id)
+            ).first()
+        if has_history:
+            await update.message.reply_text(
+                f"Welcome back! You're on Week {client.week_number}. "
+                "Type /checkin to log your week and get next week's plan."
+            )
+        else:
+            await update.message.reply_text(
+                "Welcome back! Your account is set up — finish your profile with /update_profile "
+                "or wait for your coach to send your first plan."
+            )
+        return ConversationHandler.END
+
+    # Brand-new chat: show the pre-payment menu.
+    return await _show_root_menu(update, context)
+
+
+async def _show_root_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    keyboard = [
+        [InlineKeyboardButton("💳 Subscribe", callback_data="menu_subscribe")],
+        [InlineKeyboardButton("❓ Ask a question", callback_data="menu_faq")],
+        [InlineKeyboardButton("🔑 I have an account", callback_data="menu_login")],
+    ]
+    text = (
+        "Welcome to *Beyond Fit*! 🏋️‍♂️\n\n"
+        "Pick one to get started:\n"
+        "• *Subscribe* — pay and start with a coach\n"
+        "• *Ask a question* — about pricing, what's included, etc.\n"
+        "• *I have an account* — bind this device with your access code"
+    )
+    sender = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
+    await sender(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    return MENU_ROOT
+
+
+# ── Pre-payment funnel handlers ────────────────────────────────────────────────
+
+
+async def handle_menu_subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    s = get_settings()
+    keyboard = [
+        [InlineKeyboardButton(f"1 Month — EGP {s.subscription_price_1m_egp}", callback_data="sub_pick:1m")],
+        [InlineKeyboardButton(f"3 Months — EGP {s.subscription_price_3m_egp}", callback_data="sub_pick:3m")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="menu_back")],
+    ]
+    await query.edit_message_text(
+        "Choose your plan:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+    return SUBSCRIBE_PICK_PLAN
+
+
+async def handle_subscribe_pick_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    plan_type = query.data.split(":", 1)[1]  # "1m" or "3m"
+    s = get_settings()
+    amount = s.subscription_price_1m_egp if plan_type == "1m" else s.subscription_price_3m_egp
+    months = "1 month" if plan_type == "1m" else "3 months"
+    context.user_data["subscribe_plan_type"] = plan_type
+    context.user_data["subscribe_amount"] = amount
+
+    payee = s.instapay_display_name or "Beyond Fit"
+    handle = s.instapay_payee_handle or "(handle not configured)"
+    text = (
+        f"💳 *Pay EGP {amount}* for *{months}* via Instapay:\n\n"
+        f"• To: *{payee}*\n"
+        f"• Handle: `{handle}`\n\n"
+        "Once you've paid, *send the screenshot here* as a photo. "
+        "Your coach will verify it and unlock your account."
+    )
+    await query.edit_message_text(text, parse_mode="Markdown")
+    return SUBSCRIBE_AWAIT_SCREENSHOT
+
+
+async def handle_payment_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Photo received from a prospective subscriber."""
+    photos = update.message.photo or []
+    if not photos:
+        await update.message.reply_text("Please send the receipt as a photo (not a document).")
+        return SUBSCRIBE_AWAIT_SCREENSHOT
+    file_id = photos[-1].file_id  # largest resolution
+
+    plan_type = context.user_data.get("subscribe_plan_type")
+    amount = context.user_data.get("subscribe_amount")
+    if plan_type not in ("1m", "3m") or not isinstance(amount, int):
+        await update.message.reply_text("Session expired — please /start over.")
+        return ConversationHandler.END
+
+    chat_id = update.effective_chat.id
+    sender_name = update.effective_user.first_name or update.effective_user.username or str(chat_id)
+
+    # Reserve a client_id now; the ClientProfile row is created on verify.
+    client_id = context.user_data.get("subscribe_client_id") or auth_roles.new_client_id()
+    context.user_data["subscribe_client_id"] = client_id
 
     with Session(engine, expire_on_commit=False) as session:
-        client = session.get(ClientProfile, client_id)
-        if client:
-            has_history = session.exec(
-                select(WorkoutHistory).where(WorkoutHistory.client_id == client_id)
-            ).first()
-            if has_history:
-                await update.message.reply_text(
-                    f"Welcome back! You're on Week {client.week_number}. "
-                    "Type /checkin to log your week and get next week's plan."
-                )
-                return ConversationHandler.END
-            else:
-                # Profile exists with no history (interrupted onboarding).
-                # Wipe child rows first — FKs aren't ON DELETE CASCADE.
-                for snap in session.exec(
-                    select(ProfileSnapshot).where(ProfileSnapshot.client_id == client_id)
-                ).all():
-                    session.delete(snap)
-                for pend in session.exec(
-                    select(PendingApproval).where(PendingApproval.client_id == client_id)
-                ).all():
-                    session.delete(pend)
-                session.delete(client)
-                session.commit()
+        payment = Payment(
+            client_id=client_id,
+            plan_type=plan_type,
+            amount_egp=amount,
+            screenshot_file_id=file_id,
+            status="pending",
+            submitted_at=datetime.now(timezone.utc),
+        )
+        session.add(payment)
+        session.commit()
+        session.refresh(payment)
+        payment_id = payment.id
+
+    # Stash chat_id + sender_name on Payment via in-memory bot_data so verify can DM back.
+    pending_index = context.application.bot_data.setdefault("pending_payments", {})
+    pending_index[payment_id] = {
+        "chat_id": chat_id,
+        "sender_name": sender_name,
+        "client_id": client_id,
+        "plan_type": plan_type,
+        "amount": amount,
+    }
+
+    logging.info("payment_submitted client_id=%s payment_id=%s amount=%s", client_id, payment_id, amount)
+
+    # DM super-admin with the screenshot + verify/reject buttons.
+    sa_id = auth_roles.super_admin_user_id()
+    if sa_id is None:
+        await update.message.reply_text(
+            "❗ Coach contact not configured on the bot. Please reach out directly."
+        )
+        return ConversationHandler.END
+
+    months = "1 month" if plan_type == "1m" else "3 months"
+    caption = (
+        f"💳 *Payment pending* (id `{payment_id}`)\n"
+        f"From: *{sender_name}* (chat `{chat_id}`)\n"
+        f"Plan: {months} — EGP {amount}\n"
+        f"Tentative client_id: `{client_id}`"
+    )
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Verify", callback_data=f"pay_verify:{payment_id}"),
+        InlineKeyboardButton("❌ Reject", callback_data=f"pay_reject:{payment_id}"),
+    ]])
+    await context.bot.send_photo(
+        chat_id=sa_id,
+        photo=file_id,
+        caption=caption,
+        parse_mode="Markdown",
+        reply_markup=keyboard,
+    )
+
+    await update.message.reply_text(
+        "✅ Got it! Your screenshot is with the coach. You'll get a message here once it's verified."
+    )
+    return ConversationHandler.END
+
+
+# ── FAQ flow ───────────────────────────────────────────────────────────────────
+
+
+_FAQ_SYSTEM_PROMPT = (
+    "You are a concise customer-service assistant for the Beyond Fit coaching app. "
+    "Answer questions about the service in 2-4 short sentences. Stay in scope: "
+    "what the service is, how subscription works, pricing, what's included, "
+    "how check-ins work, how to contact the coach. "
+    "Hard facts you can cite: subscription tiers are EGP 1500 / month and EGP 3500 / "
+    "3 months, paid via Instapay; access is unlocked after a coach verifies the payment "
+    "screenshot; clients receive weekly programmed workouts and (optionally) nutrition "
+    "plans, then check in to log RPE/weights so the next week is auto-regulated; one "
+    "human coach reviews and approves every plan before it's sent. "
+    "If the user asks about anything outside the service, refuse politely and redirect "
+    "to the Subscribe button. Never invent prices or policies you weren't told."
+)
+
+
+async def handle_menu_faq(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text(
+        "Ask me anything about the service. Type /cancel to go back to the menu.\n"
+        "(Up to 5 questions per hour.)"
+    )
+    return FAQ_LOOP
+
+
+async def handle_faq_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    chat_id = update.effective_chat.id
+    if not _faq_rate_check(chat_id):
+        await update.message.reply_text(
+            "You've hit the hourly question limit. Try again in a bit, or use Subscribe to start."
+        )
+        return FAQ_LOOP
+
+    question = (update.message.text or "").strip()
+    if not question:
+        return FAQ_LOOP
+    if len(question) > 500:
+        await update.message.reply_text("Please keep your question under 500 characters.")
+        return FAQ_LOOP
+
+    try:
+        llm = FlashCommunicationService(_make_llm_client())
+        answer = llm._llm.complete(
+            system=_FAQ_SYSTEM_PROMPT,
+            user=question,
+            temperature=0.4,
+        )
+    except Exception as err:
+        logging.warning("faq_llm_call failed chat_id=%s err=%s", chat_id, err)
+        await update.message.reply_text(
+            "Sorry, I can't reach the assistant right now. Please try again later, or hit Subscribe."
+        )
+        return FAQ_LOOP
+
+    logging.info("faq_llm_call chat_id=%s q_len=%s", chat_id, len(question))
+    answer = (answer or "").strip()[:1500] or "I'm not sure — please reach out via Subscribe to talk to the coach."
+    await update.message.reply_text(answer)
+    return FAQ_LOOP
+
+
+# ── Login by access code (Phase C bundled) ─────────────────────────────────────
+
+
+async def handle_menu_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text(
+        "🔑 Send your access code (looks like `BF-XXXX-XXXX-XXXX`).\n"
+        "Type /cancel to go back to the menu.",
+        parse_mode="Markdown",
+    )
+    return LOGIN_AWAIT_CODE
+
+
+async def handle_login_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    code = (update.message.text or "").strip().upper()
+    chat_id = update.effective_chat.id
+
+    client_id = auth_roles.find_client_by_access_code(code)
+    if client_id is None:
+        await update.message.reply_text(
+            "❌ Invalid code. Double-check it and resend, or /cancel to go back."
+        )
+        return LOGIN_AWAIT_CODE
+
+    with Session(engine, expire_on_commit=False) as session:
+        result = auth_roles.bind_chat(session, chat_id=chat_id, client_id=client_id, is_primary=False)
+
+    if result == "conflict":
+        logging.info("chat_rebind_attempt blocked chat_id=%s requested_client_id=%s", chat_id, client_id)
+        await update.message.reply_text(
+            "❌ This Telegram chat is already linked to a different account. Reach out to the coach if this is a mistake."
+        )
+        return ConversationHandler.END
+
+    await update.message.reply_text(
+        "✅ Logged in. Use /plan to see your current week or /checkin to log your last week."
+    )
+    return ConversationHandler.END
+
+
+# ── Menu navigation ────────────────────────────────────────────────────────────
+
+
+async def handle_menu_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    return await _show_root_menu(update, context)
+
+
+# ── Post-verify intake entry ──────────────────────────────────────────────────
+
+
+async def handle_setup_begin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Triggered by the 'Begin setup' button DM'd to the client after pay_verify."""
+    query = update.callback_query
+    await query.answer()
+    chat_id = query.message.chat_id
+    client = auth_roles.get_authenticated_client(chat_id)
+    if client is None:
+        await query.edit_message_text("This chat isn't linked to an account yet. /start over.")
+        return ConversationHandler.END
+
+    # Stash client_id so handle_email persists into the existing row instead of
+    # creating a new one keyed by str(telegram_user_id).
+    context.user_data["intake_client_id"] = client.client_id
 
     keyboard = [[
         InlineKeyboardButton("Powerlifter", callback_data="powerlifter"),
@@ -455,11 +758,194 @@ async def start_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE)
     ], [
         InlineKeyboardButton("General Fitness", callback_data="gen_pop"),
     ]]
-    await update.message.reply_text(
-        "Welcome to Beyond Fit! 🏋️‍♂️\n\nWhat is your primary training goal?",
+    await query.edit_message_text(
+        "Let's set up your profile! 🏋️‍♂️\n\nWhat is your primary training goal?",
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
     return ASK_AVATAR
+
+
+# ── Admin payment review ───────────────────────────────────────────────────────
+
+
+async def handle_payment_verify(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    if not auth_roles.is_super_admin(update.effective_user.id):
+        await query.edit_message_caption(caption=query.message.caption + "\n\n🔒 Not authorized.")
+        return
+
+    payment_id = int(query.data.split(":", 1)[1])
+    pending_index = context.application.bot_data.get("pending_payments", {})
+    info = pending_index.get(payment_id)
+
+    with Session(engine, expire_on_commit=False) as session:
+        payment = session.get(Payment, payment_id)
+        if payment is None:
+            await query.edit_message_caption(caption="⚠️ Payment record vanished.")
+            return
+        if payment.status != "pending":
+            await query.edit_message_caption(caption=f"Already {payment.status}.")
+            return
+
+        client_id = payment.client_id
+        plan_type = payment.plan_type
+        chat_id = info.get("chat_id") if info else None
+        sender_name = info.get("sender_name") if info else None
+
+        if chat_id is None:
+            # Fallback: payment row exists but bot_data lost (restart). Reject path.
+            await query.edit_message_caption(
+                caption=(query.message.caption or "")
+                + "\n\n⚠️ Lost the client's chat reference (bot restarted). Reject + ask client to /start again."
+            )
+            return
+
+        # 1. Create ClientProfile row (deferred until verify).
+        existing_profile = session.get(ClientProfile, client_id)
+        if existing_profile is None:
+            session.add(ClientProfile(
+                client_id=client_id,
+                avatar="gen_pop",
+                training_days=3,
+                experience_level="beginner",
+                week_number=1,
+                name=sender_name,
+                created_at=datetime.now(timezone.utc),
+            ))
+
+        # 2. Create Subscription window.
+        days = 30 if plan_type == "1m" else 90
+        now = datetime.now(timezone.utc)
+        subscription = Subscription(
+            client_id=client_id,
+            plan_type=plan_type,
+            started_at=now,
+            ends_at=now + timedelta(days=days),
+            status="active",
+            payment_id=payment_id,
+            created_at=now,
+        )
+        session.add(subscription)
+
+        # 3. Generate access code.
+        code = auth_roles.generate_unique_access_code(session)
+        session.add(AccessCode(
+            client_id=client_id,
+            code=code,
+            created_at=now,
+        ))
+
+        # 4. Bind the originating chat as primary.
+        session.add(ChatBinding(
+            chat_id=chat_id,
+            client_id=client_id,
+            bound_at=now,
+            is_primary=True,
+        ))
+
+        # 5. Mark Payment verified.
+        payment.status = "verified"
+        payment.verified_at = now
+        payment.verified_by = str(update.effective_user.id)
+        session.add(payment)
+
+        session.commit()
+        session.refresh(subscription)
+        sub_id = subscription.id
+
+    logging.info(
+        "payment_verified payment_id=%s subscription_id=%s client_id=%s",
+        payment_id, sub_id, client_id,
+    )
+
+    # DM the client: code + warning + setup button.
+    code_text = (
+        "✅ *Payment verified!*\n\n"
+        f"Your access code (don't share with anyone):\n\n`{code}`\n\n"
+        "Save it somewhere safe. You can use it to log in from another device.\n\n"
+        "Tap below to finish setting up your profile."
+    )
+    setup_btn = InlineKeyboardMarkup([[InlineKeyboardButton("👉 Begin setup", callback_data="setup_begin")]])
+    try:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=code_text,
+            parse_mode="Markdown",
+            reply_markup=setup_btn,
+        )
+    except Exception as err:
+        logging.warning("payment_verify dm_failed client_id=%s err=%s", client_id, err)
+
+    # Update the admin's message.
+    try:
+        await query.edit_message_caption(
+            caption=(query.message.caption or "")
+            + f"\n\n✅ Verified. Subscription `{sub_id}` active until "
+            + (now + timedelta(days=days)).strftime("%Y-%m-%d") + ".",
+            parse_mode="Markdown",
+        )
+    except Exception:
+        pass
+
+
+async def handle_payment_reject_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    if not auth_roles.is_super_admin(update.effective_user.id):
+        try:
+            await query.edit_message_caption(caption=(query.message.caption or "") + "\n\n🔒 Not authorized.")
+        except Exception:
+            pass
+        return ConversationHandler.END
+    payment_id = int(query.data.split(":", 1)[1])
+    context.user_data["reject_payment_id"] = payment_id
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=f"Reason for rejecting payment `{payment_id}`? (free text)",
+        parse_mode="Markdown",
+    )
+    return PAY_REJECT_REASON
+
+
+async def handle_payment_reject_reason(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    payment_id = context.user_data.pop("reject_payment_id", None)
+    reason = (update.message.text or "").strip()
+    if payment_id is None:
+        await update.message.reply_text("Lost track of which payment to reject. Re-tap Reject on the message.")
+        return ConversationHandler.END
+
+    pending_index = context.application.bot_data.get("pending_payments", {})
+    info = pending_index.get(payment_id)
+
+    with Session(engine, expire_on_commit=False) as session:
+        payment = session.get(Payment, payment_id)
+        if payment is None:
+            await update.message.reply_text("Payment vanished.")
+            return ConversationHandler.END
+        if payment.status != "pending":
+            await update.message.reply_text(f"Already {payment.status}.")
+            return ConversationHandler.END
+        payment.status = "rejected"
+        payment.rejection_reason = reason[:500]
+        payment.verified_at = datetime.now(timezone.utc)
+        payment.verified_by = str(update.effective_user.id)
+        session.add(payment)
+        session.commit()
+
+    logging.info("payment_rejected payment_id=%s reason=%r", payment_id, reason[:100])
+
+    if info and info.get("chat_id"):
+        try:
+            await context.bot.send_message(
+                chat_id=info["chat_id"],
+                text=f"❌ Your payment couldn't be verified.\n\nReason: {reason}\n\n/start over to retry.",
+            )
+        except Exception as err:
+            logging.warning("payment_reject dm_failed err=%s", err)
+
+    await update.message.reply_text(f"Rejected payment `{payment_id}`.", parse_mode="Markdown")
+    return ConversationHandler.END
 
 
 async def handle_avatar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -600,9 +1086,18 @@ async def handle_limitations(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def handle_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     email = update.message.text.strip()
     context.user_data['email'] = email
-    client_id = str(update.effective_user.id)
 
     updating = context.user_data.get('update_profile_mode', False)
+    # Post-verify intake stashes the real client_id; otherwise look up by chat binding.
+    intake_client_id = context.user_data.get('intake_client_id')
+    client = auth_roles.get_authenticated_client(update.effective_chat.id)
+    client_id = intake_client_id or (client.client_id if client else str(update.effective_user.id))
+
+    # If the row was created at pay_verify, it already exists — treat as update.
+    with Session(engine, expire_on_commit=False) as session:
+        existing = session.get(ClientProfile, client_id)
+    if existing is not None and not updating:
+        updating = True
 
     with Session(engine, expire_on_commit=False) as session:
         first_name = update.effective_user.first_name or ""
@@ -615,6 +1110,8 @@ async def handle_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 profile.limitations = context.user_data.get('limitations', profile.limitations)
                 profile.email = email
                 profile.name = first_name
+                profile.limitations_notes = context.user_data.get('limitations_notes', profile.limitations_notes)
+                profile.available_equipment = profile.available_equipment or ["full_gym"]
                 session.add(profile)
                 session.commit()
                 session.refresh(profile)
@@ -1863,8 +2360,15 @@ async def handle_nutrition_approve(update: Update, context: ContextTypes.DEFAULT
         logging.warning("Nutrition PDF render failed (%s), skipping PDF", err)
         pdf_bytes = None
 
-    client_chat_id = int(plan.client_id)
+    client_chat_id = auth_roles.resolve_primary_chat_id(plan.client_id)
     client_display = profile.name or profile.client_id
+
+    if client_chat_id is None:
+        await query.edit_message_text(
+            f"✅ Approved, but no Telegram chat is bound to {client_display} yet. "
+            "Their plan will be sent once they bind a device."
+        )
+        return
 
     if pdf_bytes:
         await context.bot.send_document(
@@ -2964,10 +3468,36 @@ def main():
         ASK_LIMITATIONS_OTHER: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_limitations_other)],
     }
 
-    # ── Client intake ──
+    _menu_states = {
+        MENU_ROOT: [
+            CallbackQueryHandler(handle_menu_subscribe, pattern=r"^menu_subscribe$"),
+            CallbackQueryHandler(handle_menu_faq, pattern=r"^menu_faq$"),
+            CallbackQueryHandler(handle_menu_login, pattern=r"^menu_login$"),
+        ],
+        SUBSCRIBE_PICK_PLAN: [
+            CallbackQueryHandler(handle_subscribe_pick_plan, pattern=r"^sub_pick:(1m|3m)$"),
+            CallbackQueryHandler(handle_menu_back, pattern=r"^menu_back$"),
+        ],
+        SUBSCRIBE_AWAIT_SCREENSHOT: [
+            MessageHandler(filters.PHOTO, handle_payment_screenshot),
+            MessageHandler(filters.TEXT & ~filters.COMMAND,
+                           lambda u, c: u.message.reply_text("Send the receipt as a photo, or /cancel.")),
+        ],
+        LOGIN_AWAIT_CODE: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_login_code),
+        ],
+        FAQ_LOOP: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_faq_message),
+        ],
+    }
+
+    # ── Client intake (with new pre-payment menu) ──
     app.add_handler(ConversationHandler(
-        entry_points=[CommandHandler("start", start_conversation)],
-        states=_intake_states,
+        entry_points=[
+            CommandHandler("start", start_conversation),
+            CallbackQueryHandler(handle_setup_begin, pattern=r"^setup_begin$"),
+        ],
+        states={**_intake_states, **_menu_states},
         fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
     ))
@@ -3035,6 +3565,18 @@ def main():
         states={
             ADMIN_FEEDBACK: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_feedback)],
             FORMCHECK_TIPS_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_fc_tip_edit)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_admin)],
+        per_message=False,
+    ))
+
+    # ── Admin: payment reject reason capture ──
+    app.add_handler(ConversationHandler(
+        entry_points=[CallbackQueryHandler(handle_payment_reject_start, pattern=r"^pay_reject:")],
+        states={
+            PAY_REJECT_REASON: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_payment_reject_reason),
+            ],
         },
         fallbacks=[CommandHandler("cancel", cancel_admin)],
         per_message=False,
@@ -3125,6 +3667,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_review_toggle, pattern=r"^review_toggle_batch$"))
     app.add_handler(CallbackQueryHandler(handle_override_remove, pattern=r"^override_remove:"))
     app.add_handler(CallbackQueryHandler(handle_safety_clear, pattern=r"^safety_clear:"))
+    app.add_handler(CallbackQueryHandler(handle_payment_verify, pattern=r"^pay_verify:"))
 
     # Route admin replies to form-check videos back to clients
     admin_chat_id = _admin_chat_id()

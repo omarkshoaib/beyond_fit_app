@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import functools
 import logging
+import secrets
 import time
 from datetime import datetime, timezone
 from typing import Awaitable, Callable, Optional
 
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.database import engine
@@ -140,6 +142,63 @@ def has_active_subscription(client_id: str) -> bool:
             )
         ).first()
     return row is not None
+
+
+# ── Access code generation + bind ────────────────────────────────────
+
+# Crockford base32 alphabet (no I, L, O, U).
+_CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+
+def _make_code() -> str:
+    """Return a fresh BF-XXXX-XXXX-XXXX style code (12 Crockford chars)."""
+    raw = secrets.token_bytes(8)
+    body = "".join(_CROCKFORD[b & 0x1F] for b in raw)[:12]
+    return f"BF-{body[0:4]}-{body[4:8]}-{body[8:12]}"
+
+
+def generate_unique_access_code(session: Session, max_attempts: int = 4) -> str:
+    """Return a code that's not currently in use. Caller commits."""
+    for _ in range(max_attempts):
+        candidate = _make_code()
+        if session.exec(select(AccessCode).where(AccessCode.code == candidate)).first() is None:
+            return candidate
+    # ~60 bits entropy; 4 collisions in a row is astronomically unlikely.
+    raise RuntimeError("could not generate a unique access code after retries")
+
+
+def new_client_id() -> str:
+    """Generate an opaque client_id. `cl_` prefix breaks any int() assumption."""
+    return "cl_" + secrets.token_urlsafe(8).rstrip("=").replace("-", "").replace("_", "")[:12]
+
+
+def bind_chat(session: Session, chat_id: int, client_id: str, *, is_primary: bool = False) -> str:
+    """Idempotent ChatBinding insert.
+
+    Returns:
+      - "bound": new binding created.
+      - "already": chat_id already maps to the same client_id.
+      - "conflict": chat_id already maps to a *different* client_id (rejected).
+    """
+    existing = session.exec(select(ChatBinding).where(ChatBinding.chat_id == chat_id)).first()
+    if existing is not None:
+        return "already" if existing.client_id == client_id else "conflict"
+    try:
+        session.add(ChatBinding(
+            chat_id=chat_id,
+            client_id=client_id,
+            bound_at=datetime.now(timezone.utc),
+            is_primary=is_primary,
+        ))
+        session.commit()
+        return "bound"
+    except IntegrityError:
+        session.rollback()
+        # Race: another worker inserted same chat_id.
+        existing = session.exec(select(ChatBinding).where(ChatBinding.chat_id == chat_id)).first()
+        if existing is not None and existing.client_id == client_id:
+            return "already"
+        return "conflict"
 
 
 # ── PTB notify helper ────────────────────────────────────────────────
