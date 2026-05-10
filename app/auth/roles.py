@@ -152,8 +152,10 @@ _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 def _make_code() -> str:
     """Return a fresh BF-XXXX-XXXX-XXXX style code (12 Crockford chars)."""
-    raw = secrets.token_bytes(8)
-    body = "".join(_CROCKFORD[b & 0x1F] for b in raw)[:12]
+    # 12 random bytes → 12 Crockford chars (each contributes 5 bits via low-nibble
+    # mask; ~60 bits effective entropy after mod-32 collisions, sufficient at our scale).
+    raw = secrets.token_bytes(12)
+    body = "".join(_CROCKFORD[b & 0x1F] for b in raw)
     return f"BF-{body[0:4]}-{body[4:8]}-{body[8:12]}"
 
 

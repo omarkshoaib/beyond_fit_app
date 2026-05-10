@@ -49,6 +49,19 @@ logging.basicConfig(
 )
 
 
+def _resolve_review_recipient(client_id: str) -> int | None:
+    """Where to DM a plan-approval message for this client.
+
+    Prefers the client's assigned coach (Phase H scope). Falls back to the
+    super-admin for unassigned clients so plans don't go unreviewed.
+    """
+    with Session(engine) as session:
+        client = session.get(ClientProfile, client_id)
+    if client is not None and client.assigned_coach_id is not None:
+        return client.assigned_coach_id
+    return auth_roles.super_admin_user_id() or _admin_chat_id()
+
+
 def _admin_chat_id() -> int | None:
     """Resolve the admin Telegram chat ID.
 
@@ -393,8 +406,10 @@ async def run_generation_and_dispatch(
             session.add(pending)
             session.commit()
 
-        admin_chat_id = _admin_chat_id()
-        if admin_chat_id is not None:
+        # Route the approval DM to the assigned coach (Phase H scope) — falls back
+        # to the super-admin for unassigned clients so the plan doesn't go unreviewed.
+        review_recipient = _resolve_review_recipient(client_user_id)
+        if review_recipient is not None:
             keyboard = [[
                 InlineKeyboardButton("✅ Approve", callback_data=f"approve:{approval_id}"),
                 InlineKeyboardButton("❌ Reject", callback_data=f"reject:{approval_id}"),
@@ -426,7 +441,7 @@ async def run_generation_and_dispatch(
                 admin_text = admin_text[:3950] + "\n…[truncated]"
 
             await safe_send_markdown(
-                context.bot, admin_chat_id, admin_text,
+                context.bot, review_recipient, admin_text,
                 reply_markup=InlineKeyboardMarkup(keyboard),
             )
 
@@ -2619,14 +2634,17 @@ async def handle_formcheck_mode(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def handle_formcheck_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     ex_name = context.user_data.get("formcheck_exercise_name", "exercise")
-    client_id = str(update.effective_user.id)
-    admin_chat_id = _admin_chat_id()
+    fallback_id = str(update.effective_user.id)
 
     if not update.message.video and not update.message.document:
         await update.message.reply_text("Please send a video file. Try again or /cancel.")
         return FORMCHECK_VIDEO
 
-    if admin_chat_id is None:
+    # Resolve actual client_id via ChatBinding (Phase B/C); fall back to tg user id.
+    client = auth_roles.get_authenticated_client(update.effective_chat.id)
+    client_id = client.client_id if client else fallback_id
+    review_recipient = _resolve_review_recipient(client_id) if client else _admin_chat_id()
+    if review_recipient is None:
         await update.message.reply_text("Could not reach your coach right now. Try again later.")
         return ConversationHandler.END
 
@@ -2639,28 +2657,29 @@ async def handle_formcheck_video(update: Update, context: ContextTypes.DEFAULT_T
     )
     if update.message.video:
         fwd = await context.bot.send_video(
-            chat_id=admin_chat_id,
+            chat_id=review_recipient,
             video=update.message.video.file_id,
             caption=caption,
             parse_mode="Markdown",
         )
     else:
         fwd = await context.bot.send_document(
-            chat_id=admin_chat_id,
+            chat_id=review_recipient,
             document=update.message.document.file_id,
             caption=caption,
             parse_mode="Markdown",
         )
 
-    # Map admin's forwarded message ID → client chat ID so we can route the reply
+    # Map forwarded message ID → routing info so the coach's reply finds the client.
     context.application.bot_data.setdefault("video_reviews", {})[fwd.message_id] = {
         "client_chat_id": update.effective_chat.id,
+        "client_id": client_id,
         "client_name": update.effective_user.first_name,
         "exercise_name": ex_name,
     }
 
     await update.message.reply_text(
-        f"✅ Video sent to Coach Shoaib! You'll receive feedback here once he reviews it."
+        "✅ Video sent to your coach. You'll receive feedback here once they review it."
     )
     return ConversationHandler.END
 
@@ -3023,8 +3042,8 @@ async def _submit_nutrition(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             )
             return ConversationHandler.END
 
-    admin_chat_id = _admin_chat_id()
-    if admin_chat_id is not None:
+    review_recipient = _resolve_review_recipient(plan.client_id)
+    if review_recipient is not None:
         keyboard = [[
             InlineKeyboardButton("✅ Activate plan", callback_data=f"nutrapprove:{plan.id}"),
             InlineKeyboardButton("❌ Discard", callback_data=f"nutrdiscard:{plan.id}"),
@@ -3040,7 +3059,7 @@ async def _submit_nutrition(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             f"Rationale: {plan.rationale or '—'}"
         )
         await safe_send_markdown(
-            context.bot, admin_chat_id, admin_text,
+            context.bot, review_recipient, admin_text,
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
 
@@ -3152,8 +3171,20 @@ async def handle_nutrition_discard(update: Update, context: ContextTypes.DEFAULT
 # ── ADMIN: VIDEO REPLY ROUTING ─────────────────────────────────────────────────
 
 async def handle_admin_video_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Route admin's reply to a form-check video back to the client."""
+    """Route admin/coach's reply to a form-check video back to the client.
+
+    Permitted senders: super-admin (all videos) + assigned coach (only videos
+    for their own clients). Phase H runtime check replaces the old static
+    filters.Chat(admin) gate so multiple coaches can route feedback.
+    """
     if not update.message.reply_to_message:
+        return
+
+    user_id = update.effective_user.id
+    legacy_admin = _admin_chat_id()
+    is_super = auth_roles.is_super_admin(user_id) or (legacy_admin is not None and user_id == legacy_admin)
+    is_coach_user = auth_roles.is_coach(user_id)
+    if not (is_super or is_coach_user):
         return
 
     replied_id = update.message.reply_to_message.message_id
@@ -3161,6 +3192,15 @@ async def handle_admin_video_reply(update: Update, context: ContextTypes.DEFAULT
     entry = video_reviews.get(replied_id)
     if not entry:
         return
+
+    # Coach scope: only videos for their assigned clients.
+    if not is_super:
+        client_id = entry.get("client_id")
+        with Session(engine) as session:
+            client = session.get(ClientProfile, client_id) if client_id else None
+        if client is None or client.assigned_coach_id != user_id:
+            await update.message.reply_text("🔒 Not your client.")
+            return
 
     client_chat_id = entry["client_chat_id"]
     ex_name = entry["exercise_name"]
@@ -4545,13 +4585,13 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_coach_picker_back, pattern=r"^cp_back:"))
     app.add_handler(CallbackQueryHandler(handle_admin_assign, pattern=r"^admin_assign:"))
 
-    # Route admin replies to form-check videos back to clients
-    admin_chat_id = _admin_chat_id()
-    if admin_chat_id is not None:
-        app.add_handler(MessageHandler(
-            filters.Chat(admin_chat_id) & filters.REPLY & filters.TEXT,
-            handle_admin_video_reply,
-        ))
+    # Route reply-to-forwarded-video messages back to clients. Filter is broad
+    # (any reply); the handler does the role + scope check at runtime so super-
+    # admin and any approved coach can both route feedback.
+    app.add_handler(MessageHandler(
+        filters.REPLY & filters.TEXT,
+        handle_admin_video_reply,
+    ))
 
     # 24h plan acknowledgment check (runs on all client messages, group=-1 = before other handlers)
     app.add_handler(

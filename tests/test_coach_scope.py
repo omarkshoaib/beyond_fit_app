@@ -201,6 +201,30 @@ async def test_help_for_coach_includes_coach_section(monkeypatch, test_engine, m
 
 
 @pytest.mark.asyncio
+async def test_review_recipient_routes_to_assigned_coach(monkeypatch, test_engine):
+    """Plan-approval DMs should target the assigned coach, not super-admin."""
+    _patch_roles(monkeypatch, test_engine)
+    _seed(test_engine)
+    from app.bot import _resolve_review_recipient
+    # Alice is assigned to COACH_ID.
+    assert _resolve_review_recipient("cl_a") == COACH_ID
+    # Bob is assigned to OTHER_COACH_ID.
+    assert _resolve_review_recipient("cl_b") == OTHER_COACH_ID
+
+
+@pytest.mark.asyncio
+async def test_review_recipient_falls_back_to_super_admin_when_unassigned(monkeypatch, test_engine):
+    """Unassigned client → super-admin so plans don't go unreviewed."""
+    _patch_roles(monkeypatch, test_engine)
+    with Session(test_engine) as s:
+        s.add(ClientProfile(client_id="cl_orphan", avatar="gen_pop", training_days=3,
+                            assigned_coach_id=None))
+        s.commit()
+    from app.bot import _resolve_review_recipient
+    assert _resolve_review_recipient("cl_orphan") == SUPER_ADMIN_ID
+
+
+@pytest.mark.asyncio
 async def test_help_for_client_only(monkeypatch, test_engine, mock_bot):
     _patch_roles(monkeypatch, test_engine)
     update, reply = _command_update(mock_bot, user_id=11111)

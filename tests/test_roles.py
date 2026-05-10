@@ -50,6 +50,17 @@ def _patch_engine(monkeypatch, engine):
 # ── super-admin ──────────────────────────────────────────────────────
 
 
+def test_make_code_format():
+    """Codes must be `BF-XXXX-XXXX-XXXX` Crockford base32 (no truncation)."""
+    import re
+    from app.auth.roles import _make_code, _CROCKFORD
+    pattern = re.compile(rf"^BF-[{_CROCKFORD}]{{4}}-[{_CROCKFORD}]{{4}}-[{_CROCKFORD}]{{4}}$")
+    for _ in range(20):
+        code = _make_code()
+        assert len(code) == 17, f"expected 17 chars, got {len(code)}: {code}"
+        assert pattern.match(code), f"invalid format: {code}"
+
+
 def test_is_super_admin_uses_settings(monkeypatch):
     from app.auth import roles
     fake = type("S", (), {"super_admin_telegram_user_id": 42, "admin_chat_id": None})()
