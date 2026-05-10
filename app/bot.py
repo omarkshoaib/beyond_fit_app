@@ -872,21 +872,17 @@ async def handle_payment_verify(update: Update, context: ContextTypes.DEFAULT_TY
         payment_id, sub_id, client_id,
     )
 
-    # DM the client: code + warning + setup button.
+    # DM the client the access code, then show the coach picker.
     code_text = (
         "✅ *Payment verified!*\n\n"
         f"Your access code (don't share with anyone):\n\n`{code}`\n\n"
-        "Save it somewhere safe. You can use it to log in from another device.\n\n"
-        "Tap below to finish setting up your profile."
+        "Save it somewhere safe. You can use it to log in from another device."
     )
-    setup_btn = InlineKeyboardMarkup([[InlineKeyboardButton("👉 Begin setup", callback_data="setup_begin")]])
     try:
         await context.bot.send_message(
-            chat_id=chat_id,
-            text=code_text,
-            parse_mode="Markdown",
-            reply_markup=setup_btn,
+            chat_id=chat_id, text=code_text, parse_mode="Markdown",
         )
+        await _send_coach_picker(context.bot, client_id=client_id, chat_id=chat_id, with_change=False)
     except Exception as err:
         logging.warning("payment_verify dm_failed client_id=%s err=%s", client_id, err)
 
@@ -1285,6 +1281,259 @@ async def handle_coach_reject_reason(update: Update, context: ContextTypes.DEFAU
 
     await update.message.reply_text(f"❌ Coach `{coach_user_id}` rejected.", parse_mode="Markdown")
     return ConversationHandler.END
+
+
+# ── Coach picker (Phase E) ────────────────────────────────────────────────────
+
+
+async def _send_coach_picker(bot, *, client_id: str, chat_id: int, with_change: bool) -> None:
+    """DM the client with the coach picker root buttons."""
+    rows = [
+        [InlineKeyboardButton("👀 Pick a coach", callback_data=f"cp_list:{client_id}")],
+        [InlineKeyboardButton("🤝 Let coach Shoaib choose for me", callback_data=f"cp_admin:{client_id}")],
+    ]
+    if with_change:
+        rows.insert(1, [InlineKeyboardButton("🔄 Change coach", callback_data=f"cp_list:{client_id}")])
+    text = (
+        "*Pick your coach.*\n\n"
+        "• *See the list* and choose one yourself.\n"
+        "• Or *let Coach Shoaib match you* with the most-fitting coach."
+    )
+    await bot.send_message(
+        chat_id=chat_id, text=text, parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(rows),
+    )
+
+
+async def handle_coach_picker_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Client clicked 'Pick a coach' — render the list of approved coaches."""
+    query = update.callback_query
+    await query.answer()
+    client_id = query.data.split(":", 1)[1]
+
+    # Sanity: caller's chat must be bound to this client.
+    bound = auth_roles.get_authenticated_client(query.message.chat_id)
+    if bound is None or bound.client_id != client_id:
+        await query.edit_message_text("This coach picker isn't yours.")
+        return
+
+    with Session(engine) as session:
+        coaches = session.exec(
+            select(CoachProfile).where(CoachProfile.status == "approved")
+        ).all()
+
+    if not coaches:
+        await query.edit_message_text(
+            "No coaches are available yet — Coach Shoaib will assign you personally. "
+            "Hold tight, you'll get a message soon."
+        )
+        # Auto-route to admin-pick.
+        await _notify_admin_for_assignment(context.bot, client_id)
+        return
+
+    rows = [
+        [InlineKeyboardButton(
+            f"{dict(_COACH_SPECIALTIES).get(c.specialty, c.specialty)} — {c.name}",
+            callback_data=f"cp_pick:{client_id}:{c.telegram_user_id}",
+        )]
+        for c in coaches
+    ]
+    rows.append([InlineKeyboardButton("⬅️ Back", callback_data=f"cp_back:{client_id}")])
+
+    await query.edit_message_text(
+        "Pick a coach:",
+        reply_markup=InlineKeyboardMarkup(rows),
+    )
+
+
+async def handle_coach_picker_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    _, client_id, coach_id_str = query.data.split(":", 2)
+    coach_id = int(coach_id_str)
+
+    bound = auth_roles.get_authenticated_client(query.message.chat_id)
+    if bound is None or bound.client_id != client_id:
+        await query.edit_message_text("This coach picker isn't yours.")
+        return
+
+    with Session(engine, expire_on_commit=False) as session:
+        coach = session.get(CoachProfile, coach_id)
+        if coach is None or coach.status != "approved":
+            await query.edit_message_text("That coach is no longer available — pick another.")
+            return
+        client = session.get(ClientProfile, client_id)
+        if client is None:
+            await query.edit_message_text("Client record vanished. /start over.")
+            return
+        client.assigned_coach_id = coach_id
+        session.add(client)
+        session.commit()
+
+    logging.info("coach_assigned client_id=%s coach_id=%s", client_id, coach_id)
+
+    await query.edit_message_text(
+        f"✅ Assigned to *{coach.name}* ({dict(_COACH_SPECIALTIES).get(coach.specialty, coach.specialty)}).",
+        parse_mode="Markdown",
+    )
+
+    # Now offer to begin profile setup (only if not yet set up).
+    if not (client.email and client.training_days):
+        try:
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text="Tap below to finish setting up your profile.",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("👉 Begin setup", callback_data="setup_begin"),
+                ]]),
+            )
+        except Exception as err:
+            logging.warning("coach_pick begin_setup dm_failed err=%s", err)
+
+
+async def handle_coach_picker_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Client clicked 'Let admin choose' — notify super-admin."""
+    query = update.callback_query
+    await query.answer()
+    client_id = query.data.split(":", 1)[1]
+
+    bound = auth_roles.get_authenticated_client(query.message.chat_id)
+    if bound is None or bound.client_id != client_id:
+        await query.edit_message_text("This coach picker isn't yours.")
+        return
+
+    await _notify_admin_for_assignment(context.bot, client_id)
+    await query.edit_message_text(
+        "🤝 Got it — Coach Shoaib will pick the best match and assign you. "
+        "You'll get a message here once it's done."
+    )
+
+
+async def handle_coach_picker_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    client_id = query.data.split(":", 1)[1]
+    bound = auth_roles.get_authenticated_client(query.message.chat_id)
+    if bound is None or bound.client_id != client_id:
+        return
+    # Determine if client already has a coach (to show Change option).
+    with Session(engine) as session:
+        client = session.get(ClientProfile, client_id)
+    with_change = bool(client and client.assigned_coach_id)
+    rows = [
+        [InlineKeyboardButton("👀 Pick a coach", callback_data=f"cp_list:{client_id}")],
+        [InlineKeyboardButton("🤝 Let coach Shoaib choose for me", callback_data=f"cp_admin:{client_id}")],
+    ]
+    if with_change:
+        rows.insert(1, [InlineKeyboardButton("🔄 Change coach", callback_data=f"cp_list:{client_id}")])
+    text = (
+        "*Pick your coach.*\n\n"
+        "• *See the list* and choose one yourself.\n"
+        "• Or *let Coach Shoaib match you* with the most-fitting coach."
+    )
+    await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(rows))
+
+
+async def _notify_admin_for_assignment(bot, client_id: str) -> None:
+    """DM the super-admin with the list of approved coaches as quick-assign buttons."""
+    sa_id = auth_roles.super_admin_user_id()
+    if sa_id is None:
+        logging.warning("admin_pick requested but no super_admin configured")
+        return
+
+    with Session(engine) as session:
+        client = session.get(ClientProfile, client_id)
+        coaches = session.exec(
+            select(CoachProfile).where(CoachProfile.status == "approved")
+        ).all()
+
+    name = (client and client.name) or client_id
+    if not coaches:
+        await bot.send_message(
+            chat_id=sa_id,
+            text=(
+                f"⚠️ Client *{name}* (`{client_id}`) needs a coach but none are approved yet. "
+                "Approve a CoachProfile first, then re-run the picker."
+            ),
+            parse_mode="Markdown",
+        )
+        return
+
+    rows = [
+        [InlineKeyboardButton(
+            f"{dict(_COACH_SPECIALTIES).get(c.specialty, c.specialty)} — {c.name}",
+            callback_data=f"admin_assign:{client_id}:{c.telegram_user_id}",
+        )]
+        for c in coaches
+    ]
+    text = (
+        f"🤝 *Coach assignment needed* — client *{name}* (`{client_id}`) "
+        "wants you to pick. Tap a coach to assign:"
+    )
+    await bot.send_message(
+        chat_id=sa_id, text=text, parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(rows),
+    )
+
+
+async def handle_admin_assign(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Super-admin assigns a coach from the notification message."""
+    query = update.callback_query
+    await query.answer()
+    if not auth_roles.is_super_admin(update.effective_user.id):
+        return
+    _, client_id, coach_id_str = query.data.split(":", 2)
+    coach_id = int(coach_id_str)
+
+    with Session(engine, expire_on_commit=False) as session:
+        coach = session.get(CoachProfile, coach_id)
+        client = session.get(ClientProfile, client_id)
+        if coach is None or coach.status != "approved":
+            await query.edit_message_text("That coach is no longer approved.")
+            return
+        if client is None:
+            await query.edit_message_text("Client record vanished.")
+            return
+        client.assigned_coach_id = coach_id
+        session.add(client)
+        session.commit()
+
+    logging.info("coach_assigned_by_admin client_id=%s coach_id=%s", client_id, coach_id)
+
+    await query.edit_message_text(
+        f"✅ Assigned *{coach.name}* to {client.name or client_id}.",
+        parse_mode="Markdown",
+    )
+
+    # Notify the client.
+    chat_id = auth_roles.resolve_primary_chat_id(client_id)
+    if chat_id is not None:
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"✅ Coach Shoaib paired you with *{coach.name}*.",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("👉 Begin setup", callback_data="setup_begin"),
+                ]]),
+            )
+        except Exception as err:
+            logging.warning("admin_assign client dm_failed err=%s", err)
+
+
+async def cmd_pick_coach(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/pick_coach — re-open the coach picker for an authenticated client."""
+    chat_id = update.effective_chat.id
+    client = auth_roles.get_authenticated_client(chat_id)
+    if client is None:
+        await update.message.reply_text("Your chat isn't linked to a client account. /start over.")
+        return
+    await _send_coach_picker(
+        context.bot,
+        client_id=client.client_id,
+        chat_id=chat_id,
+        with_change=bool(client.assigned_coach_id),
+    )
 
 
 async def handle_avatar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -4015,6 +4264,7 @@ def main():
     # ── Client commands ──
     app.add_handler(CommandHandler("plan", client_plan))
     app.add_handler(CommandHandler("help", handle_help))
+    app.add_handler(CommandHandler("pick_coach", cmd_pick_coach))
 
     # ── Admin commands ──
     app.add_handler(CommandHandler("review", admin_review))
@@ -4035,6 +4285,11 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_safety_clear, pattern=r"^safety_clear:"))
     app.add_handler(CallbackQueryHandler(handle_payment_verify, pattern=r"^pay_verify:"))
     app.add_handler(CallbackQueryHandler(handle_coach_verify, pattern=r"^coach_verify:"))
+    app.add_handler(CallbackQueryHandler(handle_coach_picker_list, pattern=r"^cp_list:"))
+    app.add_handler(CallbackQueryHandler(handle_coach_picker_pick, pattern=r"^cp_pick:"))
+    app.add_handler(CallbackQueryHandler(handle_coach_picker_admin, pattern=r"^cp_admin:"))
+    app.add_handler(CallbackQueryHandler(handle_coach_picker_back, pattern=r"^cp_back:"))
+    app.add_handler(CallbackQueryHandler(handle_admin_assign, pattern=r"^admin_assign:"))
 
     # Route admin replies to form-check videos back to clients
     admin_chat_id = _admin_chat_id()
