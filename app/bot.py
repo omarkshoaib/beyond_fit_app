@@ -32,7 +32,7 @@ from datetime import datetime, timedelta, timezone
 from app.models import (
     ClientProfile, WorkoutWeek, WorkoutSlot, PendingApproval, WorkoutHistory, ProfileSnapshot,
     NutritionProfile, NutritionPlan, CheckIn,
-    AccessCode, Payment, Subscription, ChatBinding,
+    AccessCode, Payment, Subscription, ChatBinding, CoachProfile,
 )
 from app.database import engine, create_db_and_tables
 from app.auth import roles as auth_roles
@@ -126,6 +126,17 @@ FORMCHECK_TIPS_CONFIRM = 101
     LOGIN_AWAIT_CODE, FAQ_LOOP, PAY_REJECT_REASON,
 ) = ["MENU_ROOT", "SUBSCRIBE_PICK_PLAN", "SUBSCRIBE_AWAIT_SCREENSHOT",
      "LOGIN_AWAIT_CODE", "FAQ_LOOP", "PAY_REJECT_REASON"]
+
+# ── Coach-application states ────────────────────────────────────────────────────
+(
+    COACH_APPLY_NAME, COACH_APPLY_EMAIL, COACH_APPLY_MOBILE,
+    COACH_APPLY_SPECIALTY, COACH_APPLY_YEARS, COACH_APPLY_CERTS,
+    COACH_APPLY_CV, COACH_APPLY_PORTFOLIO, COACH_REJECT_REASON,
+) = [
+    "COACH_APPLY_NAME", "COACH_APPLY_EMAIL", "COACH_APPLY_MOBILE",
+    "COACH_APPLY_SPECIALTY", "COACH_APPLY_YEARS", "COACH_APPLY_CERTS",
+    "COACH_APPLY_CV", "COACH_APPLY_PORTFOLIO", "COACH_REJECT_REASON",
+]
 
 
 # ── FAQ rate limiter (5 questions / chat / hour) ───────────────────────────────
@@ -487,13 +498,15 @@ async def _show_root_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         [InlineKeyboardButton("💳 Subscribe", callback_data="menu_subscribe")],
         [InlineKeyboardButton("❓ Ask a question", callback_data="menu_faq")],
         [InlineKeyboardButton("🔑 I have an account", callback_data="menu_login")],
+        [InlineKeyboardButton("🧑‍🏫 I want to coach", callback_data="menu_coach")],
     ]
     text = (
         "Welcome to *Beyond Fit*! 🏋️‍♂️\n\n"
         "Pick one to get started:\n"
         "• *Subscribe* — pay and start with a coach\n"
         "• *Ask a question* — about pricing, what's included, etc.\n"
-        "• *I have an account* — bind this device with your access code"
+        "• *I have an account* — bind this device with your access code\n"
+        "• *I want to coach* — apply to join the team"
     )
     sender = update.callback_query.edit_message_text if update.callback_query else update.message.reply_text
     await sender(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -945,6 +958,332 @@ async def handle_payment_reject_reason(update: Update, context: ContextTypes.DEF
             logging.warning("payment_reject dm_failed err=%s", err)
 
     await update.message.reply_text(f"Rejected payment `{payment_id}`.", parse_mode="Markdown")
+    return ConversationHandler.END
+
+
+# ── Coach application flow (Phase D) ──────────────────────────────────────────
+
+
+_COACH_SPECIALTIES = [
+    ("powerlifting", "Powerlifting"),
+    ("powerbuilding", "Powerbuilding"),
+    ("bodybuilding", "Bodybuilding"),
+    ("gen_pop", "General fitness"),
+]
+
+
+async def handle_menu_coach(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    # Check if this telegram_user_id already has an application.
+    user_id = update.effective_user.id
+    with Session(engine) as session:
+        existing = session.get(CoachProfile, user_id)
+    if existing is not None:
+        msg = {
+            "pending": "⏳ Your coach application is already submitted. Coach Shoaib will review it shortly.",
+            "approved": "✅ You're already on the team! Use /help to see your coach commands.",
+            "rejected": (
+                "Your previous application wasn't approved. "
+                f"Reason: {existing.rejection_reason or '—'}\n"
+                "Reach out to the coach if you'd like to re-apply."
+            ),
+        }.get(existing.status, "An application exists for this account.")
+        await query.edit_message_text(msg)
+        return ConversationHandler.END
+
+    context.user_data["coach_apply"] = {}
+    await query.edit_message_text(
+        "🧑‍🏫 *Coach application*\n\n"
+        "We'll need a few details + your CV (PDF). Type /cancel anytime to abort.\n\n"
+        "First — what's your *full name*?",
+        parse_mode="Markdown",
+    )
+    return COACH_APPLY_NAME
+
+
+async def coach_apply_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    name = (update.message.text or "").strip()
+    if len(name) < 2:
+        await update.message.reply_text("Please send your full name (at least 2 characters).")
+        return COACH_APPLY_NAME
+    context.user_data.setdefault("coach_apply", {})["name"] = name[:120]
+    await update.message.reply_text("Good. What's your *email* address?", parse_mode="Markdown")
+    return COACH_APPLY_EMAIL
+
+
+async def coach_apply_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    email = (update.message.text or "").strip()
+    if "@" not in email or " " in email or len(email) > 120:
+        await update.message.reply_text("That doesn't look like a valid email. Try again.")
+        return COACH_APPLY_EMAIL
+    context.user_data.setdefault("coach_apply", {})["email"] = email
+    await update.message.reply_text(
+        "Got it. *Mobile number* (the one Coach Shoaib can call for an interview)?",
+        parse_mode="Markdown",
+    )
+    return COACH_APPLY_MOBILE
+
+
+async def coach_apply_mobile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    mobile = (update.message.text or "").strip()
+    if len(mobile) < 7 or len(mobile) > 30:
+        await update.message.reply_text("Please send a valid phone number with country code.")
+        return COACH_APPLY_MOBILE
+    context.user_data.setdefault("coach_apply", {})["mobile"] = mobile
+    keyboard = [
+        [InlineKeyboardButton(label, callback_data=f"coach_spec:{key}")]
+        for key, label in _COACH_SPECIALTIES
+    ]
+    await update.message.reply_text(
+        "What's your *specialty*?",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+    return COACH_APPLY_SPECIALTY
+
+
+async def coach_apply_specialty(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    spec = query.data.split(":", 1)[1]
+    valid = {k for k, _ in _COACH_SPECIALTIES}
+    if spec not in valid:
+        await query.edit_message_text("Pick one of the listed specialties.")
+        return COACH_APPLY_SPECIALTY
+    context.user_data.setdefault("coach_apply", {})["specialty"] = spec
+    await query.edit_message_text("How many *years* of coaching experience? (just the number)",
+                                   parse_mode="Markdown")
+    return COACH_APPLY_YEARS
+
+
+async def coach_apply_years(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    raw = (update.message.text or "").strip()
+    try:
+        years = int(raw)
+    except ValueError:
+        await update.message.reply_text("Send a whole number, e.g. `5`.", parse_mode="Markdown")
+        return COACH_APPLY_YEARS
+    if years < 0 or years > 60:
+        await update.message.reply_text("That doesn't seem right — try again.")
+        return COACH_APPLY_YEARS
+    context.user_data.setdefault("coach_apply", {})["years"] = years
+    await update.message.reply_text(
+        "*Certifications / qualifications* (one message, free text — list whatever's relevant):",
+        parse_mode="Markdown",
+    )
+    return COACH_APPLY_CERTS
+
+
+async def coach_apply_certs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    certs = (update.message.text or "").strip()[:1500]
+    if len(certs) < 3:
+        await update.message.reply_text("Please send a brief list of certifications.")
+        return COACH_APPLY_CERTS
+    context.user_data.setdefault("coach_apply", {})["certifications"] = certs
+    await update.message.reply_text(
+        "Now *upload your CV* as a PDF (paperclip → File). "
+        "Or type /skip to continue without one.",
+        parse_mode="Markdown",
+    )
+    return COACH_APPLY_CV
+
+
+async def coach_apply_cv(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Accept a PDF upload (or /skip) then move to optional portfolio text."""
+    cv_file_id: str | None = None
+    if update.message.document is not None:
+        doc = update.message.document
+        mime = (doc.mime_type or "").lower()
+        if "pdf" not in mime and not (doc.file_name or "").lower().endswith(".pdf"):
+            await update.message.reply_text(
+                "Please send a PDF (or /skip)."
+            )
+            return COACH_APPLY_CV
+        cv_file_id = doc.file_id
+    elif update.message.text and update.message.text.strip().lower() == "/skip":
+        cv_file_id = None
+    else:
+        await update.message.reply_text("Send a PDF document, or /skip.")
+        return COACH_APPLY_CV
+
+    context.user_data.setdefault("coach_apply", {})["cv_file_id"] = cv_file_id
+    await update.message.reply_text(
+        "Last step — *short portfolio note* (one paragraph: who you train, results, "
+        "anything else relevant). Or /skip.",
+        parse_mode="Markdown",
+    )
+    return COACH_APPLY_PORTFOLIO
+
+
+async def coach_apply_portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    raw = (update.message.text or "").strip()
+    portfolio = None if raw.lower() == "/skip" else raw[:2000]
+    data = context.user_data.get("coach_apply", {})
+    user_id = update.effective_user.id
+
+    with Session(engine, expire_on_commit=False) as session:
+        # Re-check on race: another submission might have inserted while we collected.
+        existing = session.get(CoachProfile, user_id)
+        if existing is not None:
+            await update.message.reply_text("It looks like you already have an application — try later.")
+            return ConversationHandler.END
+
+        coach = CoachProfile(
+            telegram_user_id=user_id,
+            name=data.get("name", "—"),
+            email=data.get("email", "—"),
+            mobile=data.get("mobile", "—"),
+            specialty=data.get("specialty", "gen_pop"),
+            years_experience=int(data.get("years", 0)),
+            certifications=data.get("certifications", "—"),
+            cv_file_id=data.get("cv_file_id"),
+            portfolio_text=portfolio,
+            status="pending",
+            applied_at=datetime.now(timezone.utc),
+        )
+        session.add(coach)
+        session.commit()
+        session.refresh(coach)
+
+    logging.info("coach_application_submitted user_id=%s name=%s", user_id, data.get("name"))
+
+    sa_id = auth_roles.super_admin_user_id()
+    if sa_id is not None:
+        spec_label = dict(_COACH_SPECIALTIES).get(coach.specialty, coach.specialty)
+        bundle = (
+            "🧑‍🏫 *New coach application*\n"
+            f"• Name: *{coach.name}*\n"
+            f"• Email: `{coach.email}`\n"
+            f"• Mobile: `{coach.mobile}`\n"
+            f"• Specialty: {spec_label}\n"
+            f"• Experience: {coach.years_experience} years\n"
+            f"• Certifications: {coach.certifications}\n"
+            f"• Portfolio: {portfolio or '—'}\n"
+            f"• Telegram user id: `{user_id}`"
+        )
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Approve", callback_data=f"coach_verify:{user_id}"),
+            InlineKeyboardButton("❌ Reject", callback_data=f"coach_reject:{user_id}"),
+        ]])
+        try:
+            await context.bot.send_message(
+                chat_id=sa_id, text=bundle, parse_mode="Markdown", reply_markup=keyboard,
+            )
+            if coach.cv_file_id is not None:
+                await context.bot.send_document(
+                    chat_id=sa_id,
+                    document=coach.cv_file_id,
+                    caption=f"CV — {coach.name}",
+                )
+        except Exception as err:
+            logging.warning("coach_application admin notify failed: %s", err)
+
+    await update.message.reply_text(
+        "✅ Submitted! Coach Shoaib will reach out to your mobile number for the interview."
+    )
+    context.user_data.pop("coach_apply", None)
+    return ConversationHandler.END
+
+
+# ── Admin coach approve/reject ────────────────────────────────────────────────
+
+
+async def handle_coach_verify(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    if not auth_roles.is_super_admin(update.effective_user.id):
+        return
+
+    coach_user_id = int(query.data.split(":", 1)[1])
+    with Session(engine, expire_on_commit=False) as session:
+        coach = session.get(CoachProfile, coach_user_id)
+        if coach is None:
+            try:
+                await query.edit_message_text("⚠️ Coach record vanished.")
+            except Exception:
+                pass
+            return
+        if coach.status != "pending":
+            try:
+                await query.edit_message_text(f"Already {coach.status}.")
+            except Exception:
+                pass
+            return
+        coach.status = "approved"
+        coach.decided_at = datetime.now(timezone.utc)
+        coach.decided_by = str(update.effective_user.id)
+        session.add(coach)
+        session.commit()
+
+    auth_roles.invalidate_coach_cache(coach_user_id)
+    logging.info("coach_approved user_id=%s by=%s", coach_user_id, update.effective_user.id)
+
+    try:
+        await context.bot.send_message(
+            chat_id=coach_user_id,
+            text=f"✅ Welcome aboard, *{coach.name}*! You've been approved as a coach.\n"
+                 "You'll receive client plans for review here.",
+            parse_mode="Markdown",
+        )
+    except Exception as err:
+        logging.warning("coach_approve dm_failed user_id=%s err=%s", coach_user_id, err)
+
+    try:
+        await query.edit_message_text(f"✅ {coach.name} approved.")
+    except Exception:
+        pass
+
+
+async def handle_coach_reject_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    if not auth_roles.is_super_admin(update.effective_user.id):
+        return ConversationHandler.END
+    coach_user_id = int(query.data.split(":", 1)[1])
+    context.user_data["reject_coach_user_id"] = coach_user_id
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=f"Reason for rejecting coach `{coach_user_id}`? (free text)",
+        parse_mode="Markdown",
+    )
+    return COACH_REJECT_REASON
+
+
+async def handle_coach_reject_reason(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    coach_user_id = context.user_data.pop("reject_coach_user_id", None)
+    if coach_user_id is None:
+        await update.message.reply_text("Lost track — re-tap the Reject button on the message.")
+        return ConversationHandler.END
+    reason = (update.message.text or "").strip()[:500]
+
+    with Session(engine, expire_on_commit=False) as session:
+        coach = session.get(CoachProfile, coach_user_id)
+        if coach is None:
+            await update.message.reply_text("Coach vanished.")
+            return ConversationHandler.END
+        if coach.status != "pending":
+            await update.message.reply_text(f"Already {coach.status}.")
+            return ConversationHandler.END
+        coach.status = "rejected"
+        coach.rejection_reason = reason
+        coach.decided_at = datetime.now(timezone.utc)
+        coach.decided_by = str(update.effective_user.id)
+        session.add(coach)
+        session.commit()
+
+    auth_roles.invalidate_coach_cache(coach_user_id)
+    logging.info("coach_rejected user_id=%s reason=%r", coach_user_id, reason[:100])
+
+    try:
+        await context.bot.send_message(
+            chat_id=coach_user_id,
+            text=f"Your coach application wasn't approved this time.\n\nReason: {reason}",
+        )
+    except Exception as err:
+        logging.warning("coach_reject dm_failed err=%s", err)
+
+    await update.message.reply_text(f"❌ Coach `{coach_user_id}` rejected.", parse_mode="Markdown")
     return ConversationHandler.END
 
 
@@ -3473,6 +3812,7 @@ def main():
             CallbackQueryHandler(handle_menu_subscribe, pattern=r"^menu_subscribe$"),
             CallbackQueryHandler(handle_menu_faq, pattern=r"^menu_faq$"),
             CallbackQueryHandler(handle_menu_login, pattern=r"^menu_login$"),
+            CallbackQueryHandler(handle_menu_coach, pattern=r"^menu_coach$"),
         ],
         SUBSCRIBE_PICK_PLAN: [
             CallbackQueryHandler(handle_subscribe_pick_plan, pattern=r"^sub_pick:(1m|3m)$"),
@@ -3488,6 +3828,20 @@ def main():
         ],
         FAQ_LOOP: [
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_faq_message),
+        ],
+        COACH_APPLY_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, coach_apply_name)],
+        COACH_APPLY_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, coach_apply_email)],
+        COACH_APPLY_MOBILE: [MessageHandler(filters.TEXT & ~filters.COMMAND, coach_apply_mobile)],
+        COACH_APPLY_SPECIALTY: [CallbackQueryHandler(coach_apply_specialty, pattern=r"^coach_spec:")],
+        COACH_APPLY_YEARS: [MessageHandler(filters.TEXT & ~filters.COMMAND, coach_apply_years)],
+        COACH_APPLY_CERTS: [MessageHandler(filters.TEXT & ~filters.COMMAND, coach_apply_certs)],
+        COACH_APPLY_CV: [
+            MessageHandler(filters.Document.ALL, coach_apply_cv),
+            CommandHandler("skip", coach_apply_cv),
+        ],
+        COACH_APPLY_PORTFOLIO: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, coach_apply_portfolio),
+            CommandHandler("skip", coach_apply_portfolio),
         ],
     }
 
@@ -3582,6 +3936,18 @@ def main():
         per_message=False,
     ))
 
+    # ── Admin: coach reject reason capture ──
+    app.add_handler(ConversationHandler(
+        entry_points=[CallbackQueryHandler(handle_coach_reject_start, pattern=r"^coach_reject:")],
+        states={
+            COACH_REJECT_REASON: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_coach_reject_reason),
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_admin)],
+        per_message=False,
+    ))
+
     # ── Nutrition intake ──
     app.add_handler(ConversationHandler(
         entry_points=[CommandHandler("diet", start_diet)],
@@ -3668,6 +4034,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_override_remove, pattern=r"^override_remove:"))
     app.add_handler(CallbackQueryHandler(handle_safety_clear, pattern=r"^safety_clear:"))
     app.add_handler(CallbackQueryHandler(handle_payment_verify, pattern=r"^pay_verify:"))
+    app.add_handler(CallbackQueryHandler(handle_coach_verify, pattern=r"^coach_verify:"))
 
     # Route admin replies to form-check videos back to clients
     admin_chat_id = _admin_chat_id()
