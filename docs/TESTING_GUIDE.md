@@ -1,6 +1,6 @@
 # Beyond Fit — Manual Testing Guide
 
-Bot-only deployment on `95.111.247.88`. Bot username: `@beyond_x_fit_bot`. Admin Telegram ID: `1314558685` (Omar). Test client account used during initial verification: `876071788`.
+Bot-only deployment on `95.111.247.88`. Bot username: `@beyond_x_fit_bot`. Super-admin Telegram ID: `1314558685` (Omar). Test client account used during initial verification: `876071788`.
 
 This doc tells you, for every user-facing flow:
 1. **Flow** — what the code does step by step
@@ -10,6 +10,123 @@ This doc tells you, for every user-facing flow:
 5. **DB tables touched** — so you can verify state with SQL when something is unclear
 
 Scroll to the section you want. Each is independent.
+
+> **🆕 SaaS refactor (Phases A–H)** — `/start` now opens a pre-payment menu. Service commands (`/checkin`, `/diet`, `/plan`, `/log`) are gated on (a) chat bound to a client account, (b) active subscription, (c) assigned coach. New flows: Subscribe → screenshot → super-admin verify → access code; coach application via bot with CV; coach picker; daily renewal reminders; multi-device login via access code. Search "Phase" in this doc for the new sections.
+
+---
+
+## 0a. Phase A–H quick test plan (run in this order)
+
+1. **Pre-payment menu** — `/start` from a fresh chat → expect 4-button menu (Subscribe / Ask question / I have account / I want to coach).
+2. **FAQ** — tap "Ask a question" → ask 1–2 things → expect LLM reply. 6th question in an hour → blocked.
+3. **Subscribe + verify** — Subscribe → pick 1m → see EGP 1500 + Instapay text → upload any photo → super-admin gets DM with verify/reject → tap ✅ → client receives `BF-XXXX-XXXX-XXXX` code + "Pick your coach" menu.
+4. **Coach apply** — from a different chat, "I want to coach" → fill 8-step questionnaire → super-admin gets bundle + CV → tap ✅ Approve.
+5. **Coach pick** — back in client chat, tap "Pick a coach" → buttons list approved coaches → tap one → "Assigned to X" → "Begin setup" button.
+6. **Begin setup** → goes into avatar/days/experience/limitations/email flow (existing intake) → workout plan generates → DM goes to **assigned coach** (not super-admin).
+7. **Multi-device login** — from a third chat, `/start` → "I have an account" → paste code → bound; `/plan` shows the client's plan.
+8. **/checkin gate** — log out (drop ChatBinding) and try `/checkin` → "isn't linked" message. Expire sub manually and `/checkin` → "expired" message. Clear `assigned_coach_id` and `/checkin` → "Pick a coach" message.
+9. **Renewal reminders** — set a sub's `ends_at` to `now + 7d 1h`, run the job manually, check DM + `reminderlog` row.
+10. **Coach scope** — as a coach (not super-admin), `/review` shows only your assigned clients' plans; `/override <other_client>` returns "🔒 Not your client."
+
+---
+
+## 0b. Paid SaaS flow — detailed
+
+### Subscribe path
+
+**Flow:** `/start` → menu → "💳 Subscribe" → state `SUBSCRIBE_PICK_PLAN` (buttons 1m/3m) → state `SUBSCRIBE_AWAIT_SCREENSHOT` → photo handler stores `Payment(status="pending")` → DM super-admin with photo + `pay_verify:<id>` / `pay_reject:<id>` buttons.
+
+**Verify (super-admin tap):** inserts `Subscription` (30 or 90 days), `AccessCode` (`BF-XXXX-XXXX-XXXX`, 17-char Crockford), primary `ChatBinding`, marks `Payment.status="verified"`, DMs client with code + coach picker. Client clicks coach → `ClientProfile.assigned_coach_id` set → "Begin setup" button → re-enters the legacy avatar/days/.../email intake using the new `client_id` (`cl_<token>`), not `str(tg_user_id)`.
+
+**Reject (super-admin tap):** super-admin types reason → `Payment.status="rejected"`, `rejection_reason` stored, client DM'd.
+
+**DB tables:** `payment`, `subscription`, `accesscode`, `chatbinding`, `clientprofile`.
+
+**Watch:**
+- Photo upload fails silently → check `bot.send_photo` logs (line ~610). `photo[-1].file_id` extraction.
+- Verify works but no DM → super-admin id misconfigured. Check `SUPER_ADMIN_TELEGRAM_USER_ID` env.
+- Two clients submit a payment at the same time → both `Payment` rows insert; verify both work independently because `payment.id` is autoincrement.
+
+### Login by access code
+
+**Flow:** `/start` from a new chat → "🔑 I have an account" → type code → `find_client_by_access_code` lookup → `bind_chat` inserts ChatBinding(is_primary=False). Already-bound chat to a different client → "blocked" reply, logs `chat_rebind_attempt`.
+
+**DB:** `chatbinding`.
+
+### FAQ Q&A
+
+**Flow:** "❓ Ask a question" → `FAQ_LOOP` state → message goes through `FlashCommunicationService._llm.complete` with a fixed system prompt about service/pricing/Instapay/refunds. Rate-limit module-level dict caps at `FAQ_RATE_LIMIT_PER_HOUR` (default 5) per chat.
+
+**Watch:** LLM unreachable → bot replies "Sorry, I can't reach the assistant…". Logs `faq_llm_call` per call.
+
+### Coach application
+
+**Flow:** "🧑‍🏫 I want to coach" → 8-state conversation (name → email → mobile → specialty buttons → years → certs → CV PDF or `/skip` → portfolio or `/skip`) → inserts `CoachProfile(status="pending")` → DMs super-admin bundle + forwards CV. Approve/reject buttons `coach_verify:<tg_id>` / `coach_reject:<tg_id>`. Re-entry guard: existing pending/approved/rejected application blocks re-apply with a status-specific message.
+
+**DB:** `coachprofile`.
+
+### Coach picker
+
+**Flow:** after pay_verify, client gets DM with 3 buttons (Pick / Let admin choose / *Change* shown if already assigned). Pick → list of `CoachProfile WHERE status='approved'` → tap → writes `ClientProfile.assigned_coach_id`. "Let admin pick" → DMs super-admin "needs assignment" with one button per approved coach → super-admin tap fires `admin_assign:<client_id>:<coach_id>` → writes the FK + DMs client.
+
+**Cross-chat hijack guard:** `cp_pick` re-checks `ChatBinding` so only the bound owner can pick for that `client_id`. Other chats see "This coach picker isn't yours."
+
+### Daily renewal jobs (Phase F)
+
+- **09:00 UTC** `send_renewal_reminders`: DMs clients whose `subscription.ends_at` is in the d-7 / d-3 / d-1 window. Idempotent via `reminderlog UNIQUE(subscription_id, kind)`.
+- **00:05 UTC** `expire_subscriptions`: flips `status='active' → 'expired'` for past `ends_at` + DMs the client.
+
+**Verify manually:**
+```sql
+-- mock a sub ending in ~7.5 days
+UPDATE subscription SET ends_at = now() + interval '7 days 1 hour' WHERE id=<sub_id>;
+```
+Then run the job from a Python REPL inside the bot container:
+```python
+import asyncio
+from app.bot import send_renewal_reminders
+from types import SimpleNamespace
+# (use the actual app.bot instance, or a stub: SimpleNamespace(bot=<app.bot>))
+```
+
+### Subscription + coach gate (Phase G)
+
+Decorators `@requires_active_sub` and `@requires_assigned_coach` (in `app/auth/roles.py`) wrap the service entry-points. Failure messages:
+- Unbound chat → "Your chat isn't linked to an account yet. Tap /start."
+- Expired sub → "⛔ Your subscription has expired. Tap /start → Subscribe to renew."
+- No coach assigned → "👀 Pick a coach first with /pick_coach."
+
+Whitelisted commands (still work pre-binding): `/start`, `/help`, `/cancel`. Callbacks always pass.
+
+### Role-aware /help (Phase H)
+
+- Anyone → "Client commands" section.
+- Approved coach (and not super-admin) → adds "Coach commands" section.
+- Super-admin → adds "Super-admin commands" section. (Coach section suppressed for super-admin since they see everything.)
+
+### Coach scope on /review, /override (Phase H)
+
+- Super-admin: `/review` and `/review_batch` show all pending; silent-client list spans every client.
+- Coach: shows only clients with `assigned_coach_id == coach.telegram_user_id`.
+- `/override <other_coaches_client>`: "🔒 You don't have access to that client (not assigned to you)."
+- Form-check video reply: super-admin can reply to any video; coach can reply only to videos from their assigned clients.
+
+### Plan-DM routing (Phase H fix)
+
+When a plan is ready for approval, the bot DMs the **assigned coach** (via `_resolve_review_recipient(client_id)`), not the super-admin. Unassigned clients fall back to super-admin so plans never go unreviewed.
+
+### Schema diff (migration 0017)
+
+New tables: `coachprofile`, `payment`, `subscription`, `accesscode`, `chatbinding`, `reminderlog`. New `clientprofile` columns: `assigned_coach_id (BIGINT)`, `created_at`. Legacy `is_coach`/`is_admin`/`coach_id` kept on `clientprofile` for FastAPI back-compat. Migration also wipes all client-derived rows — apply only when you're ready to start fresh.
+
+```sql
+-- inspect a fresh signup
+SELECT * FROM payment ORDER BY id DESC LIMIT 3;
+SELECT * FROM subscription ORDER BY id DESC LIMIT 3;
+SELECT * FROM accesscode;
+SELECT * FROM chatbinding;
+SELECT telegram_user_id, name, status FROM coachprofile;
+```
 
 ---
 
