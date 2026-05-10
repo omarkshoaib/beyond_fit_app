@@ -1536,6 +1536,161 @@ async def cmd_pick_coach(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     )
 
 
+# ── Subscription expiry + renewal reminders (Phase F) ─────────────────────────
+
+
+from app.models import ReminderLog  # noqa: E402  (kept near job code for locality)
+
+
+_REMINDER_KINDS = (("d7", 7), ("d3", 3), ("d1", 1))
+
+
+def _utc_naive_now() -> datetime:
+    """SQLite returns naive datetimes — keep arithmetic naive-naive everywhere."""
+    return datetime.utcnow()
+
+
+def _as_naive(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=None) if dt.tzinfo is not None else dt
+
+
+async def send_renewal_reminders(context) -> None:
+    """Daily job: DM clients whose subscription ends in 7/3/1 days. Idempotent
+    via ReminderLog UNIQUE(subscription_id, kind)."""
+    bot = context.bot
+    now = _utc_naive_now()
+    for kind, days in _REMINDER_KINDS:
+        window_start = now + timedelta(days=days)
+        window_end = window_start + timedelta(days=1)
+        await _emit_reminder_window(bot, kind, window_start, window_end)
+
+
+async def _emit_reminder_window(bot, kind: str, window_start: datetime, window_end: datetime) -> None:
+    with Session(engine) as session:
+        sent_ids = {
+            r.subscription_id for r in session.exec(
+                select(ReminderLog).where(ReminderLog.kind == kind)
+            )
+        }
+        candidates = session.exec(
+            select(Subscription).where(
+                Subscription.status == "active",
+                Subscription.ends_at >= window_start,
+                Subscription.ends_at < window_end,
+            )
+        ).all()
+        candidates = [c for c in candidates if c.id not in sent_ids]
+
+    for sub in candidates:
+        chat_id = auth_roles.resolve_primary_chat_id(sub.client_id)
+        if chat_id is None:
+            continue
+        ends_naive = _as_naive(sub.ends_at)
+        days_left = max(0, (ends_naive - _utc_naive_now()).days) if ends_naive else 0
+        msg = _renewal_message(kind, days_left)
+        try:
+            await bot.send_message(chat_id=chat_id, text=msg, parse_mode="Markdown")
+        except Exception as err:
+            logging.warning("renewal_reminder send_failed sub_id=%s err=%s", sub.id, err)
+            continue
+        with Session(engine) as session:
+            try:
+                session.add(ReminderLog(
+                    subscription_id=sub.id, kind=kind,
+                    sent_at=datetime.now(timezone.utc),
+                ))
+                session.commit()
+                logging.info(
+                    "renewal_reminder_sent client_id=%s kind=%s sub_id=%s",
+                    sub.client_id, kind, sub.id,
+                )
+            except Exception as err:
+                # UNIQUE collision = another worker beat us; safe.
+                session.rollback()
+                logging.info("renewal_reminder duplicate sub_id=%s kind=%s (%s)", sub.id, kind, err)
+
+
+def _renewal_message(kind: str, days_left: int) -> str:
+    if kind == "d7":
+        return (
+            f"⏳ Heads up — your subscription expires in *{days_left} days*.\n"
+            "Renew with /start → Subscribe to keep your plan running."
+        )
+    if kind == "d3":
+        return (
+            f"⏳ *3 days left* on your subscription.\n"
+            "Renew now to avoid losing access — /start → Subscribe."
+        )
+    if kind == "d1":
+        return (
+            "⚠️ *Your subscription expires tomorrow.*\n"
+            "Renew today to keep getting plans — /start → Subscribe."
+        )
+    return f"Subscription reminder ({kind}, {days_left}d)."
+
+
+async def expire_subscriptions(context) -> None:
+    """Daily job: mark subs whose ends_at has passed as expired + DM the client."""
+    bot = context.bot
+    now = _utc_naive_now()
+    expired_ids: list[int] = []
+    expired_clients: list[tuple[int, str]] = []  # (sub_id, client_id)
+
+    with Session(engine, expire_on_commit=False) as session:
+        rows = session.exec(
+            select(Subscription).where(
+                Subscription.status == "active",
+                Subscription.ends_at < now,
+            )
+        ).all()
+        for sub in rows:
+            sub.status = "expired"
+            session.add(sub)
+            expired_ids.append(sub.id)
+            expired_clients.append((sub.id, sub.client_id))
+        session.commit()
+
+    sent_kind = "expired"
+    for sub_id, client_id in expired_clients:
+        chat_id = auth_roles.resolve_primary_chat_id(client_id)
+        if chat_id is None:
+            continue
+        # Idempotency on the "expired" DM as well.
+        with Session(engine) as session:
+            already = session.exec(
+                select(ReminderLog).where(
+                    ReminderLog.subscription_id == sub_id,
+                    ReminderLog.kind == sent_kind,
+                )
+            ).first()
+        if already is not None:
+            continue
+        try:
+            await bot.send_message(
+                chat_id=chat_id,
+                text=(
+                    "⛔ *Your subscription has expired.*\n\n"
+                    "Service is paused. /start → Subscribe to renew."
+                ),
+                parse_mode="Markdown",
+            )
+        except Exception as err:
+            logging.warning("expire_dm send_failed sub_id=%s err=%s", sub_id, err)
+            continue
+        with Session(engine) as session:
+            try:
+                session.add(ReminderLog(
+                    subscription_id=sub_id, kind=sent_kind,
+                    sent_at=datetime.now(timezone.utc),
+                ))
+                session.commit()
+            except Exception:
+                session.rollback()
+        logging.info("subscription_expired sub_id=%s client_id=%s", sub_id, client_id)
+
+
 async def handle_avatar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
@@ -4042,6 +4197,25 @@ def main():
 
     create_db_and_tables()
     app = ApplicationBuilder().token(token).build()
+
+    # ── Daily renewal-reminder + expiry jobs (Phase F) ──
+    if app.job_queue is not None:
+        import datetime as _dt
+        app.job_queue.run_daily(
+            send_renewal_reminders,
+            time=_dt.time(hour=9, minute=0, tzinfo=timezone.utc),
+            name="send_renewal_reminders",
+        )
+        app.job_queue.run_daily(
+            expire_subscriptions,
+            time=_dt.time(hour=0, minute=5, tzinfo=timezone.utc),
+            name="expire_subscriptions",
+        )
+    else:
+        logging.warning(
+            "JobQueue unavailable — install python-telegram-bot[job-queue]. "
+            "Daily renewal reminders + expiry will NOT run."
+        )
 
     _intake_states = {
         ASK_AVATAR: [CallbackQueryHandler(handle_avatar, pattern=r"^(powerlifter|powerbuilder|gen_pop)$")],

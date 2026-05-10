@@ -17,7 +17,7 @@ dependencies = [
     "pydantic-settings>=2.3,<3",
     "openai>=1.30,<2",
     "python-dotenv",
-    "python-telegram-bot>=22.7,<23",
+    "python-telegram-bot[job-queue]>=22.7,<23",
     "markdown2",
     "weasyprint>=62.0,<63",
     "pydyf>=0.10.0,<0.11",
