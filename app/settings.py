@@ -36,6 +36,17 @@ class Settings(BaseSettings):
     # ── Telegram ────────────────────────────────────────────────────
     telegram_bot_token: str = ""
     admin_chat_id: Optional[int] = None
+    # New role gate. Bot uses this; legacy admin_chat_id is kept as fallback.
+    super_admin_telegram_user_id: Optional[int] = None
+
+    # ── Subscription / payment ─────────────────────────────────────
+    subscription_price_1m_egp: int = 1500
+    subscription_price_3m_egp: int = 3500
+    instapay_payee_handle: str = ""
+    instapay_display_name: str = ""
+
+    # ── FAQ rate-limit ─────────────────────────────────────────────
+    faq_rate_limit_per_hour: int = 5
 
     # ── Email ───────────────────────────────────────────────────────
     smtp_host: str = ""

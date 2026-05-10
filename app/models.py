@@ -4,7 +4,7 @@ from datetime import datetime
 from pydantic import BaseModel
 from typing import Dict, List, Optional
 from sqlmodel import SQLModel, Field
-from sqlalchemy import Column, JSON, BigInteger
+from sqlalchemy import Column, JSON, BigInteger, UniqueConstraint
 
 
 class Exercise(BaseModel):
@@ -35,6 +35,10 @@ class ClientProfile(SQLModel, table=True):
     active_workout_id: Optional[int] = None
     email: Optional[str] = Field(default=None)
     name: Optional[str] = Field(default=None)
+    # Bot-side coach link (BigInteger Telegram user id of CoachProfile.telegram_user_id).
+    # Distinct from coach_id (FastAPI layer) by type and intent.
+    assigned_coach_id: Optional[int] = Field(default=None, sa_column=Column(BigInteger))
+    created_at: Optional[datetime] = Field(default=None)
     # Per-client feature flags (e.g. {"nutrition": True})
     features: Optional[Dict] = Field(default=None, sa_column=Column(JSON))
     # Coach exercise substitution map: {original_exercise_id: replacement_exercise_id}
@@ -258,3 +262,75 @@ class WorkoutWeek(BaseModel):
 class CoachedWorkoutResponse(BaseModel):
     workout: WorkoutWeek
     coaching_message: str
+
+
+# ── Bot-side paid SaaS tables (migration 0017) ────────────────────────
+
+
+class CoachProfile(SQLModel, table=True):
+    """Bot-driven coach application + status. Distinct from CoachInvite (web)."""
+    telegram_user_id: int = Field(sa_column=Column(BigInteger, primary_key=True))
+    name: str
+    email: str = Field(index=True)
+    mobile: str
+    specialty: str
+    years_experience: int
+    certifications: str
+    cv_file_id: Optional[str] = Field(default=None)
+    portfolio_text: Optional[str] = Field(default=None)
+    status: str = Field(default="pending")  # pending | approved | rejected
+    applied_at: Optional[datetime] = Field(default=None)
+    decided_at: Optional[datetime] = Field(default=None)
+    decided_by: Optional[str] = Field(default=None)
+    rejection_reason: Optional[str] = Field(default=None)
+
+
+class Payment(SQLModel, table=True):
+    """Inbound subscription payment. Verified by super-admin from screenshot."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    client_id: str = Field(index=True)
+    plan_type: str  # "1m" | "3m"
+    amount_egp: int
+    screenshot_file_id: str
+    status: str = Field(default="pending")  # pending | verified | rejected
+    submitted_at: Optional[datetime] = Field(default=None)
+    verified_at: Optional[datetime] = Field(default=None)
+    verified_by: Optional[str] = Field(default=None)
+    rejection_reason: Optional[str] = Field(default=None)
+
+
+class Subscription(SQLModel, table=True):
+    """Active subscription window per client."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    client_id: str = Field(index=True)
+    plan_type: str
+    started_at: datetime
+    ends_at: datetime = Field(index=True)
+    status: str = Field(default="active")  # active | expired | cancelled
+    payment_id: Optional[int] = Field(default=None, foreign_key="payment.id")
+    created_at: Optional[datetime] = Field(default=None)
+
+
+class AccessCode(SQLModel, table=True):
+    """One stable code per client; used to bind extra Telegram chats."""
+    client_id: str = Field(primary_key=True)
+    code: str = Field(unique=True, index=True)
+    created_at: Optional[datetime] = Field(default=None)
+    rotated_at: Optional[datetime] = Field(default=None)
+
+
+class ChatBinding(SQLModel, table=True):
+    """Maps a Telegram chat_id to its client account. Many chats per client."""
+    chat_id: int = Field(sa_column=Column(BigInteger, primary_key=True))
+    client_id: str = Field(index=True)
+    bound_at: Optional[datetime] = Field(default=None)
+    is_primary: bool = Field(default=False)
+
+
+class ReminderLog(SQLModel, table=True):
+    """Idempotency log for daily renewal reminders. UNIQUE(subscription_id, kind)."""
+    __table_args__ = (UniqueConstraint("subscription_id", "kind", name="uq_reminderlog_sub_kind"),)
+    id: Optional[int] = Field(default=None, primary_key=True)
+    subscription_id: int = Field(index=True, foreign_key="subscription.id")
+    kind: str  # "d7" | "d3" | "d1" | "expired"
+    sent_at: datetime
