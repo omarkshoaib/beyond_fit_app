@@ -3638,18 +3638,43 @@ async def handle_plan_full_week(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def admin_review(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show index card of all pending approvals; admin taps [Open] to expand each one."""
-    admin_id = _admin_chat_id()
-    if admin_id is None or update.effective_user.id != admin_id:
+    """Show index card of pending approvals.
+
+    Super-admin sees everything. Coaches see only plans for their assigned
+    clients (ClientProfile.assigned_coach_id == coach.telegram_user_id).
+    """
+    user_id = update.effective_user.id
+    legacy_admin = _admin_chat_id()
+    is_super = auth_roles.is_super_admin(user_id) or (legacy_admin is not None and user_id == legacy_admin)
+    is_coach_user = auth_roles.is_coach(user_id)
+    if not (is_super or is_coach_user):
         return
 
     with Session(engine) as session:
-        pending_workouts = session.exec(
-            select(PendingApproval).order_by(PendingApproval.created_at)
-        ).all()
-        pending_nutrition = session.exec(
-            select(NutritionPlan).where(NutritionPlan.status == "draft")
-        ).all()
+        if is_super:
+            pending_workouts = session.exec(
+                select(PendingApproval).order_by(PendingApproval.created_at)
+            ).all()
+            pending_nutrition = session.exec(
+                select(NutritionPlan).where(NutritionPlan.status == "draft")
+            ).all()
+        else:
+            scoped_client_ids = list(session.exec(
+                select(ClientProfile.client_id).where(
+                    ClientProfile.assigned_coach_id == user_id
+                )
+            ).all())
+            pending_workouts = session.exec(
+                select(PendingApproval)
+                .where(PendingApproval.client_id.in_(scoped_client_ids))
+                .order_by(PendingApproval.created_at)
+            ).all() if scoped_client_ids else []
+            pending_nutrition = session.exec(
+                select(NutritionPlan).where(
+                    NutritionPlan.status == "draft",
+                    NutritionPlan.client_id.in_(scoped_client_ids),
+                )
+            ).all() if scoped_client_ids else []
 
     total = len(pending_workouts) + len(pending_nutrition)
     if total == 0:
@@ -3680,7 +3705,12 @@ async def admin_review(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     # Silent clients section: no check-in in >10 days
     now_utc = datetime.now(timezone.utc)
     with Session(engine) as session:
-        all_profiles = session.exec(select(ClientProfile)).all()
+        if is_super:
+            all_profiles = session.exec(select(ClientProfile)).all()
+        else:
+            all_profiles = session.exec(
+                select(ClientProfile).where(ClientProfile.assigned_coach_id == user_id)
+            ).all()
         silent_names = []
         for p in all_profiles:
             last_ci = session.exec(
@@ -3747,15 +3777,33 @@ async def handle_open_pending_item(update: Update, context: ContextTypes.DEFAULT
 
 
 async def admin_review_batch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/review_batch — groups pending plans by avatar+days bucket for efficient batch review."""
-    admin_id = _admin_chat_id()
-    if admin_id is None or update.effective_user.id != admin_id:
+    """/review_batch — groups pending plans by avatar+days bucket for efficient batch review.
+
+    Same scoping as /review: super-admin sees all, coaches see only assigned clients.
+    """
+    user_id = update.effective_user.id
+    legacy_admin = _admin_chat_id()
+    is_super = auth_roles.is_super_admin(user_id) or (legacy_admin is not None and user_id == legacy_admin)
+    is_coach_user = auth_roles.is_coach(user_id)
+    if not (is_super or is_coach_user):
         return
 
     with Session(engine) as session:
-        pending_workouts = session.exec(
-            select(PendingApproval).order_by(PendingApproval.created_at)
-        ).all()
+        if is_super:
+            pending_workouts = session.exec(
+                select(PendingApproval).order_by(PendingApproval.created_at)
+            ).all()
+        else:
+            scoped_client_ids = list(session.exec(
+                select(ClientProfile.client_id).where(
+                    ClientProfile.assigned_coach_id == user_id
+                )
+            ).all())
+            pending_workouts = session.exec(
+                select(PendingApproval)
+                .where(PendingApproval.client_id.in_(scoped_client_ids))
+                .order_by(PendingApproval.created_at)
+            ).all() if scoped_client_ids else []
 
     if not pending_workouts:
         await update.message.reply_text("No pending workout approvals.")
@@ -4051,9 +4099,16 @@ async def handle_plan_ack(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 # ── /override COMMAND — coach exercise substitution ────────────────────────────
 
 async def handle_override(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/override [client_id] [from_id] [to_id] — set, list, or remove exercise overrides."""
-    admin_id = _admin_chat_id()
-    if admin_id is None or update.effective_user.id != admin_id:
+    """/override [client_id] [from_id] [to_id] — set, list, or remove exercise overrides.
+
+    Coaches can only override exercises for their assigned clients.
+    Super-admin can override for anyone.
+    """
+    user_id = update.effective_user.id
+    legacy_admin = _admin_chat_id()
+    is_super = auth_roles.is_super_admin(user_id) or (legacy_admin is not None and user_id == legacy_admin)
+    is_coach_user = auth_roles.is_coach(user_id)
+    if not (is_super or is_coach_user):
         return
 
     args = context.args or []
@@ -4070,6 +4125,11 @@ async def handle_override(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     client_id = args[0]
     with Session(engine) as session:
         profile = session.get(ClientProfile, client_id)
+        if profile is not None and not is_super and profile.assigned_coach_id != user_id:
+            await update.message.reply_text(
+                "🔒 You don't have access to that client (not assigned to you)."
+            )
+            return
         if not profile:
             await update.message.reply_text(f"No profile found for client {client_id}.")
             return
@@ -4163,29 +4223,43 @@ async def handle_safety_clear(update: Update, context: ContextTypes.DEFAULT_TYPE
 # ── /help COMMAND ─────────────────────────────────────────────────────────────
 
 _CLIENT_HELP = (
-    "/start — create your profile & get your first plan\n"
+    "/start — show menu (subscribe / log in / ask questions)\n"
     "/checkin — log this week's sessions (main lifts)\n"
     "/log — manually log weight/RPE for any exercise\n"
     "/plan — view your current plan (today's session by default)\n"
     "/diet — set up your nutrition profile\n"
+    "/pick_coach — choose or change your coach\n"
     "/cancel — cancel the current action"
 )
 
-_ADMIN_HELP = (
-    "/review — pending plan approvals\n"
+_COACH_HELP = (
+    "/review — pending plans for your assigned clients\n"
     "/review_batch — group pending plans by training type\n"
     "/override &lt;client_id&gt; &lt;from_id&gt; &lt;to_id&gt; — substitute an exercise\n"
     "/override &lt;client_id&gt; — list/remove overrides\n"
     "/help — this message"
 )
 
+_SUPER_ADMIN_HELP = (
+    "<i>(super-admin sees ALL clients across coaches)</i>\n"
+    "/review — pending approvals (workout + nutrition)\n"
+    "/review_batch — group pending plans by training type\n"
+    "/override &lt;client_id&gt; &lt;from_id&gt; &lt;to_id&gt; — substitute an exercise\n"
+    "Coach approvals + payment verification arrive as inline-button DMs"
+)
+
 
 async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    admin_id = _admin_chat_id()
-    is_admin = admin_id is not None and update.effective_user.id == admin_id
+    user_id = update.effective_user.id
+    legacy_admin = _admin_chat_id()
+    is_super = auth_roles.is_super_admin(user_id) or (legacy_admin is not None and user_id == legacy_admin)
+    is_coach_user = auth_roles.is_coach(user_id)
+
     text = f"<b>Client commands:</b>\n{_CLIENT_HELP}"
-    if is_admin:
-        text += f"\n\n<b>Admin commands:</b>\n{_ADMIN_HELP}"
+    if is_coach_user and not is_super:
+        text += f"\n\n<b>Coach commands:</b>\n{_COACH_HELP}"
+    if is_super:
+        text += f"\n\n<b>Super-admin commands:</b>\n{_SUPER_ADMIN_HELP}"
     await update.message.reply_text(text, parse_mode="HTML")
 
 
