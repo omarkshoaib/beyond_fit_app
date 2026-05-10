@@ -1521,6 +1521,7 @@ async def handle_admin_assign(update: Update, context: ContextTypes.DEFAULT_TYPE
             logging.warning("admin_assign client dm_failed err=%s", err)
 
 
+@auth_roles.requires_active_sub
 async def cmd_pick_coach(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/pick_coach — re-open the coach picker for an authenticated client."""
     chat_id = update.effective_chat.id
@@ -1892,6 +1893,7 @@ async def handle_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return ConversationHandler.END
 
 
+@auth_roles.requires_active_sub
 async def start_update_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Entry point for /update_profile — reuses intake flow with pre-filled values."""
     client_id = str(update.effective_user.id)
@@ -1940,6 +1942,7 @@ def _make_llm_client() -> OpenRouterClient:
     )
 
 
+@auth_roles.requires_assigned_coach
 async def start_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     client_id = str(update.effective_user.id)
 
@@ -2670,6 +2673,7 @@ def _dn(context: ContextTypes.DEFAULT_TYPE) -> dict:
     return context.user_data["dn_data"]
 
 
+@auth_roles.requires_assigned_coach
 async def start_diet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["dn_data"] = {}
     # /diet quick — skip biometrics, use safe defaults
@@ -3530,6 +3534,7 @@ async def cancel_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 # ── ADMIN: /review COMMAND ─────────────────────────────────────────────────────
 
+@auth_roles.requires_assigned_coach
 async def client_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show today's session by default; /plan week shows the full week."""
     client_id = str(update.effective_user.id)
@@ -3868,6 +3873,7 @@ async def handle_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> No
 
 # ── /log COMMAND — manual set logging ────────────────────────────────────────
 
+@auth_roles.requires_assigned_coach
 async def start_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """/log — manually log weight/RPE for any exercise in the active plan."""
     client_id = str(update.effective_user.id)

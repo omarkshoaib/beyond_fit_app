@@ -219,6 +219,66 @@ async def notify_super_admin(bot, text: str, **kwargs) -> None:
 HandlerFn = Callable[..., Awaitable[object]]
 
 
+def requires_active_sub(fn: HandlerFn) -> HandlerFn:
+    """Gate a client-facing handler on (a) chat is bound and (b) sub is active.
+
+    On gate-fail: replies and returns ConversationHandler.END equivalent (None
+    is fine for non-conversation handlers; ConversationHandler treats None as
+    no-state-change anyway).
+    """
+    @functools.wraps(fn)
+    async def wrapper(update, context, *args, **kwargs):
+        chat_id = getattr(update.effective_chat, "id", None) if update.effective_chat else None
+        if chat_id is None:
+            return None
+        client = get_authenticated_client(chat_id)
+        msg = getattr(update, "effective_message", None)
+        if client is None:
+            if msg is not None:
+                await msg.reply_text(
+                    "Your chat isn't linked to an account yet. Tap /start to subscribe or log in."
+                )
+            return None
+        if not has_active_subscription(client.client_id):
+            if msg is not None:
+                await msg.reply_text(
+                    "⛔ Your subscription has expired or hasn't started yet. "
+                    "Tap /start → Subscribe to renew."
+                )
+            return None
+        return await fn(update, context, *args, **kwargs)
+    return wrapper
+
+
+def requires_assigned_coach(fn: HandlerFn) -> HandlerFn:
+    """Stricter gate: also requires assigned_coach_id to be set."""
+    @functools.wraps(fn)
+    async def wrapper(update, context, *args, **kwargs):
+        chat_id = getattr(update.effective_chat, "id", None) if update.effective_chat else None
+        if chat_id is None:
+            return None
+        client = get_authenticated_client(chat_id)
+        msg = getattr(update, "effective_message", None)
+        if client is None:
+            if msg is not None:
+                await msg.reply_text("Your chat isn't linked to an account yet. Tap /start.")
+            return None
+        if not has_active_subscription(client.client_id):
+            if msg is not None:
+                await msg.reply_text(
+                    "⛔ Your subscription has expired. Tap /start → Subscribe to renew."
+                )
+            return None
+        if client.assigned_coach_id is None:
+            if msg is not None:
+                await msg.reply_text(
+                    "👀 Pick a coach first with /pick_coach."
+                )
+            return None
+        return await fn(update, context, *args, **kwargs)
+    return wrapper
+
+
 def require_role(*, super_admin: bool = False, coach: bool = False) -> Callable[[HandlerFn], HandlerFn]:
     """Decorator gating a PTB handler by role.
 
