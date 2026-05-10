@@ -50,12 +50,26 @@ docker compose logs -f bot
 |---|---|---|
 | `POSTGRES_PASSWORD` | yes | Postgres password. **Use only `[A-Za-z0-9_-]`, 32+ chars.** It's interpolated raw into `DATABASE_URL=postgresql://coaching:<pwd>@db:5432/coaching`; `@`, `:`, `/`, `#`, `?`, `%` will break the URL. |
 | `TELEGRAM_BOT_TOKEN` | yes | from BotFather |
-| `ADMIN_CHAT_ID` | yes | your numeric Telegram user id (msg @userinfobot). Legacy `ADMIN_TELEGRAM_ID` still honoured if `ADMIN_CHAT_ID` unset. |
-| `OPENROUTER_API_KEY` | yes | openrouter.ai → Keys |
+| `SUPER_ADMIN_TELEGRAM_USER_ID` | yes | Numeric Telegram user id of the owner/super-admin. Receives payment-screenshot DMs, coach-application DMs, "needs assignment" DMs. Legacy `ADMIN_CHAT_ID` is still honoured as a fallback. |
+| `OPENROUTER_API_KEY` | yes | openrouter.ai → Keys. Also powers the FAQ Q&A loop. |
+| `INSTAPAY_PAYEE_HANDLE` | yes (paid flow) | Instapay handle shown during Subscribe (e.g. `@beyond.fit`). Empty → bot prints `(handle not configured)`. Set before going live. |
+| `INSTAPAY_DISPLAY_NAME` | yes (paid flow) | Display name shown alongside the handle (e.g. `Beyond Fit`). |
+| `SUBSCRIPTION_PRICE_1M_EGP` | no | 1-month tier price in EGP. Default `1500`. |
+| `SUBSCRIPTION_PRICE_3M_EGP` | no | 3-month tier price in EGP. Default `3500`. |
+| `FAQ_RATE_LIMIT_PER_HOUR` | no | LLM Q&A calls per chat per hour. Default `5`. |
 | `OPENROUTER_BASE_URL` | no | default fine |
 | `LLM_MODEL_ID` | no | default `google/gemini-3.1-flash-lite-preview` |
+| `ADMIN_CHAT_ID` | legacy | Pre-Phase-A name for super-admin. Still works as a fallback. |
 | SMTP* | no | unused in bot-only mode |
 | `AUTH_SECRET_KEY` | no | unused in bot-only mode |
+
+### Daily jobs (Phase F)
+
+The bot's `JobQueue` runs two daily jobs at startup:
+- **09:00 UTC** — `send_renewal_reminders`: DMs clients whose subscription ends in 7 / 3 / 1 days. Idempotent via `reminderlog(subscription_id, kind)`.
+- **00:05 UTC** — `expire_subscriptions`: flips `subscription.status` from `active` → `expired` for any sub past `ends_at` and DMs the client.
+
+Requires the `[job-queue]` extra of `python-telegram-bot` (already pinned in `pyproject.toml:20`). If the extra is missing the bot logs a warning and skips scheduling; everything else still works.
 
 ## 3. Day-to-day operations
 
