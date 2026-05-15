@@ -478,6 +478,20 @@ async def run_generation_and_dispatch(
 
 # ── CLIENT INTAKE FLOW ─────────────────────────────────────────────────────────
 
+
+def _current_client_id(update: Update) -> "str | None":
+    """Resolve the opaque ClientProfile.client_id for the current chat via ChatBinding.
+
+    Replaces the legacy `str(update.effective_user.id)` derivation, which broke
+    once client_id moved to `cl_<token>` opaque strings.
+    """
+    chat = getattr(update, "effective_chat", None)
+    if chat is None:
+        return None
+    client = auth_roles.get_authenticated_client(chat.id)
+    return client.client_id if client else None
+
+
 async def start_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Entry point for /start. Dispatches by chat-binding status:
 
@@ -1913,7 +1927,7 @@ async def handle_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 @auth_roles.requires_active_sub
 async def start_update_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Entry point for /update_profile — reuses intake flow with pre-filled values."""
-    client_id = str(update.effective_user.id)
+    client_id = _current_client_id(update) or str(update.effective_user.id)
     with Session(engine) as session:
         profile = session.get(ClientProfile, client_id)
 
@@ -1961,7 +1975,7 @@ def _make_llm_client() -> OpenRouterClient:
 
 @auth_roles.requires_assigned_coach
 async def start_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    client_id = str(update.effective_user.id)
+    client_id = _current_client_id(update) or str(update.effective_user.id)
 
     # Check for a resumable in-progress structured check-in (<2h old)
     with Session(engine) as session:
@@ -2210,7 +2224,7 @@ async def handle_structured_rpe(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data["checkin_structured_results"].setdefault(slot["exercise_id"], {})["rpe"] = rpe_val
 
     # Persist progress so check-in can be resumed
-    _persist_checkin_progress(str(update.effective_user.id), context)
+    _persist_checkin_progress(_current_client_id(update) or str(update.effective_user.id), context)
 
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("✅ No pain", callback_data="pain_none"),
@@ -2301,7 +2315,7 @@ async def _process_checkin(
     skip_clarify: bool = False,
 ) -> int:
     """Extract, optionally clarify, write telemetry, run generation."""
-    client_id = str(update.effective_user.id)
+    client_id = _current_client_id(update) or str(update.effective_user.id)
     raw_text = "\n".join(context.user_data.get("checkin_messages", []))
 
     if not raw_text.strip():
@@ -2488,7 +2502,7 @@ async def handle_post_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 async def handle_updates_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     admin_chat_id = _admin_chat_id()
     if admin_chat_id is not None:
-        summary = _build_client_summary(str(update.effective_user.id))
+        summary = _build_client_summary(_current_client_id(update) or str(update.effective_user.id))
         admin_text = (
             f"📬 *Message from client*\n\n"
             f"{summary}\n\n"
@@ -2636,7 +2650,7 @@ async def handle_formcheck_mode(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def handle_formcheck_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     ex_name = context.user_data.get("formcheck_exercise_name", "exercise")
-    fallback_id = str(update.effective_user.id)
+    fallback_id = _current_client_id(update) or str(update.effective_user.id)
 
     if not update.message.video and not update.message.document:
         await update.message.reply_text("Please send a video file. Try again or /cancel.")
@@ -3013,7 +3027,7 @@ async def _submit_nutrition(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     """Persist NutritionProfile, generate plan, notify admin."""
     from app.services.nutrition_service import NutritionService
 
-    client_id = str(update.effective_user.id)
+    client_id = _current_client_id(update) or str(update.effective_user.id)
     data = _dn(context)
 
     await update.message.reply_text("⏳ Building your personalised nutrition plan...")
@@ -3050,7 +3064,7 @@ async def _submit_nutrition(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             InlineKeyboardButton("✅ Activate plan", callback_data=f"nutrapprove:{plan.id}"),
             InlineKeyboardButton("❌ Discard", callback_data=f"nutrdiscard:{plan.id}"),
         ]]
-        summary = _build_client_summary(str(update.effective_user.id))
+        summary = _build_client_summary(_current_client_id(update) or str(update.effective_user.id))
         admin_text = (
             f"🥗 *Nutrition plan ready for approval*\n\n"
             f"{summary}\n\n"
@@ -3579,7 +3593,7 @@ async def cancel_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 @auth_roles.requires_assigned_coach
 async def client_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show today's session by default; /plan week shows the full week."""
-    client_id = str(update.effective_user.id)
+    client_id = _current_client_id(update) or str(update.effective_user.id)
     show_week = (
         context.args
         and context.args[0].lower() == "week"
@@ -3652,7 +3666,7 @@ async def handle_plan_full_week(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await query.answer()
 
-    client_id = str(update.effective_user.id)
+    client_id = _current_client_id(update) or str(update.effective_user.id)
     with Session(engine) as session:
         history = session.exec(
             select(WorkoutHistory)
@@ -3966,7 +3980,7 @@ async def handle_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> No
 @auth_roles.requires_assigned_coach
 async def start_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """/log — manually log weight/RPE for any exercise in the active plan."""
-    client_id = str(update.effective_user.id)
+    client_id = _current_client_id(update) or str(update.effective_user.id)
 
     with Session(engine) as session:
         history = session.exec(
@@ -4083,7 +4097,7 @@ async def check_plan_acknowledgment(update: Update, context: ContextTypes.DEFAUL
     if any(k in context.user_data for k in _active_conversation_keys):
         return
 
-    client_id = str(update.effective_user.id)
+    client_id = _current_client_id(update) or str(update.effective_user.id)
     now = datetime.now(timezone.utc)
 
     with Session(engine) as session:
