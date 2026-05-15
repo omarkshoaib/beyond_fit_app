@@ -9,6 +9,7 @@ import time
 from collections import defaultdict
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.helpers import escape_markdown
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -626,9 +627,10 @@ async def handle_payment_screenshot(update: Update, context: ContextTypes.DEFAUL
         return ConversationHandler.END
 
     months = "1 month" if plan_type == "1m" else "3 months"
+    safe_name = escape_markdown(sender_name, version=1)
     caption = (
         f"💳 *Payment pending* (id `{payment_id}`)\n"
-        f"From: *{sender_name}* (chat `{chat_id}`)\n"
+        f"From: *{safe_name}* (chat `{chat_id}`)\n"
         f"Plan: {months} — EGP {amount}\n"
         f"Tentative client_id: `{client_id}`"
     )
@@ -1162,15 +1164,16 @@ async def coach_apply_portfolio(update: Update, context: ContextTypes.DEFAULT_TY
     sa_id = auth_roles.super_admin_user_id()
     if sa_id is not None:
         spec_label = dict(_COACH_SPECIALTIES).get(coach.specialty, coach.specialty)
+        _esc = lambda s: escape_markdown(s or "", version=1)
         bundle = (
             "🧑‍🏫 *New coach application*\n"
-            f"• Name: *{coach.name}*\n"
+            f"• Name: *{_esc(coach.name)}*\n"
             f"• Email: `{coach.email}`\n"
             f"• Mobile: `{coach.mobile}`\n"
-            f"• Specialty: {spec_label}\n"
+            f"• Specialty: {_esc(spec_label)}\n"
             f"• Experience: {coach.years_experience} years\n"
-            f"• Certifications: {coach.certifications}\n"
-            f"• Portfolio: {portfolio or '—'}\n"
+            f"• Certifications: {_esc(coach.certifications)}\n"
+            f"• Portfolio: {_esc(portfolio) or '—'}\n"
             f"• Telegram user id: `{user_id}`"
         )
         keyboard = InlineKeyboardMarkup([[
