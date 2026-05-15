@@ -235,7 +235,7 @@ def requires_active_sub(fn: HandlerFn) -> HandlerFn:
     no-state-change anyway).
     """
     @functools.wraps(fn)
-    async def wrapper(update, context, *args, **kwargs):
+    async def wrapper(update, context, *args, **kwargs):  # type: ignore[misc]
         chat_id = getattr(update.effective_chat, "id", None) if update.effective_chat else None
         if chat_id is None:
             return None
@@ -255,6 +255,7 @@ def requires_active_sub(fn: HandlerFn) -> HandlerFn:
                 )
             return None
         return await fn(update, context, *args, **kwargs)
+    wrapper._gate = "requires_active_sub"  # type: ignore[attr-defined]
     return wrapper
 
 
@@ -284,6 +285,7 @@ def requires_assigned_coach(fn: HandlerFn) -> HandlerFn:
                 )
             return None
         return await fn(update, context, *args, **kwargs)
+    wrapper._gate = "requires_assigned_coach"  # type: ignore[attr-defined]
     return wrapper
 
 

@@ -20,11 +20,25 @@ class Exercise(BaseModel):
 
 
 class ClientProfile(SQLModel, table=True):
+    """Per-client core profile. Two coexisting coach concepts:
+
+    * **Bot (Phase A+, paid SaaS):** ``assigned_coach_id`` (BigInteger) →
+      :class:`CoachProfile` ``.telegram_user_id``. Set when a paid client picks
+      their coach. Drives plan-DM routing, /review scope, /override scope.
+    * **FastAPI / web (legacy):** ``coach_id`` (str), ``is_coach``, ``is_admin``
+      flags. Used by :mod:`app.api.admin`, :mod:`app.api.auth`,
+      :mod:`app.api.profile`. The bot does not consult these.
+
+    The two are kept in parallel intentionally so the FastAPI surface keeps
+    working without a schema break; do not delete the legacy fields unless the
+    web layer is removed first. See ``CLAUDE.md`` for the wiring.
+    """
     client_id: str = Field(primary_key=True)
     avatar: str = Field(default="gen_pop")
     training_days: int = Field(default=3, ge=3, le=6)
     experience_level: str = Field(default="beginner")
     password_hash: Optional[str] = Field(default=None)
+    # ── Web-only (FastAPI) auth fields ─────────────────────────────────────
     is_coach: bool = Field(default=False)
     is_admin: bool = Field(default=False)
     coach_id: Optional[str] = Field(default=None, index=True)

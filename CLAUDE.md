@@ -60,10 +60,16 @@ Exercise selection uses `_filter_exercises()` which gates on: `avatar_tags`, `av
 
 Uses **SQLModel** (SQLAlchemy + Pydantic hybrid). Defaults to SQLite (`coaching_engine.db`) but switches to PostgreSQL if `DATABASE_URL` env var is set.
 
-Three persisted tables:
-- `ClientProfile` — one row per client (keyed by Telegram user ID as string)
-- `WorkoutHistory` — one row per completed week; `workout_json` stores the full `WorkoutWeek` as a JSON string (including `actual_weight`/`actual_rpe` filled in during check-in)
-- `PendingApproval` — staging table for plans awaiting admin review; deleted after approve/reject
+Persisted tables (post Phase A SaaS refactor):
+- `ClientProfile` — one row per client. **Two parallel coach concepts coexist:**
+  - **Bot:** `assigned_coach_id` (BigInteger) → `CoachProfile.telegram_user_id`. Drives plan-DM routing, /review scope, /override scope. Set when a paid client picks a coach.
+  - **Web (FastAPI):** legacy `coach_id` (str) + `is_coach`/`is_admin` flags. Used by `app/api/*`. The bot does **not** consult these. Kept in parallel to preserve the FastAPI surface.
+- `CoachProfile` — bot-side coach record (CV upload, status workflow, telegram_user_id PK).
+- `Subscription` / `Payment` / `AccessCode` / `ChatBinding` / `ReminderLog` — paid-SaaS plumbing.
+- `WorkoutHistory` — one row per completed week; `workout_json` stores the full `WorkoutWeek` as a JSON string (including `actual_weight`/`actual_rpe` filled in during check-in).
+- `PendingApproval` — staging table for plans awaiting coach/admin review; deleted after approve/reject.
+
+**`client_id`** is now an opaque `cl_<token>` string generated at pay_verify time — **not** a stringified Telegram user id. Chat → client resolution goes through `ChatBinding(chat_id BigInteger PK → client_id)`. See `auth_roles.get_authenticated_client(chat_id)`.
 
 `WorkoutSlot`, `WorkoutDay`, `WorkoutWeek` are **not** database tables — they exist only as nested JSON inside `WorkoutHistory.workout_json`.
 

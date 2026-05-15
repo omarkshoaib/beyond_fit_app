@@ -38,6 +38,27 @@ from app.models import (
 from app.database import engine, create_db_and_tables
 from app.auth import roles as auth_roles
 from app.settings import get_settings
+
+# ── Subscription gating policy (Phase G) ──────────────────────────────────────
+#
+# The bot enforces "paid + assigned-to-a-coach" via two decorators on entry-point
+# handlers rather than a global group=-2 message gate. Every service entry point
+# below MUST be decorated; mid-conversation states inherit the gate transitively
+# because they are unreachable except through a gated entry.
+#
+# @auth_roles.requires_active_sub      — paid (Subscription.status='active' and ends_at>now)
+#   • start_update_profile
+#   • cmd_pick_coach
+#
+# @auth_roles.requires_assigned_coach  — paid + ClientProfile.assigned_coach_id is not NULL
+#   • start_checkin
+#   • start_diet
+#   • client_plan
+#   • start_log
+#
+# When adding a new service entry point, decorate it with one of the above.
+# When in doubt, prefer @requires_assigned_coach — the stricter gate.
+# ──────────────────────────────────────────────────────────────────────────────
 from app.adapters.llm.extractors import extract_checkin, render_digest
 from app.adapters.llm.openrouter import OpenRouterClient
 from app.domain.workout.autoregulation import derive_plan_delta, apply_delta
