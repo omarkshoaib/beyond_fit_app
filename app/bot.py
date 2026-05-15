@@ -103,6 +103,15 @@ async def safe_send_markdown(bot, chat_id, text, reply_markup=None):
 ASK_AVATAR, ASK_DAYS, ASK_EXPERIENCE, ASK_LIMITATIONS, ASK_EMAIL = range(5)
 ASK_LIMITATIONS_OTHER = "ASK_LIMITATIONS_OTHER"
 
+# ── /update_profile field-picker states (strings, isolated from intake) ───────
+UPD_PICK = "UPD_PICK"
+UPD_AVATAR = "UPD_AVATAR"
+UPD_DAYS = "UPD_DAYS"
+UPD_EXP = "UPD_EXP"
+UPD_LIM = "UPD_LIM"
+UPD_LIM_OTHER = "UPD_LIM_OTHER"
+UPD_EMAIL = "UPD_EMAIL"
+
 # ── Admin states ──────────────────────────────────────────────────────────────
 ADMIN_FEEDBACK = 100
 FORMCHECK_TIPS_CONFIRM = 101
@@ -209,6 +218,15 @@ def _build_client_summary(client_id: str) -> str:
             .order_by(WorkoutHistory.week_number.desc())
         ).all()
 
+        subscription = session.exec(
+            select(Subscription)
+            .where(Subscription.client_id == client_id, Subscription.status == "active")
+            .order_by(Subscription.ends_at.desc())
+        ).first()
+        coach = None
+        if profile.assigned_coach_id is not None:
+            coach = session.get(CoachProfile, profile.assigned_coach_id)
+
     name = profile.name or profile.client_id
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -224,6 +242,26 @@ def _build_client_summary(client_id: str) -> str:
     if profile.coach_overrides:
         override_str = ", ".join(f"{k}→{v}" for k, v in profile.coach_overrides.items())
         lines.append(f"  Overrides: {override_str}")
+    if profile.available_equipment:
+        lines.append(f"  Equipment: {', '.join(profile.available_equipment)}")
+
+    if subscription is not None:
+        ends = subscription.ends_at
+        if ends.tzinfo is None:
+            ends = ends.replace(tzinfo=timezone.utc)
+        days_left = max(0, (ends - datetime.now(timezone.utc)).days)
+        plan_label = "1 month" if subscription.plan_type == "1m" else "3 months"
+        lines.append(
+            f"  📅 Subscription: *{plan_label}* · {days_left} day(s) left "
+            f"(ends {ends.strftime('%Y-%m-%d')})"
+        )
+    else:
+        lines.append("  📅 Subscription: *none active*")
+
+    if coach is not None:
+        lines.append(f"  🧑‍🏫 Coach: *{coach.name}* ({coach.specialty})")
+    elif profile.assigned_coach_id is None:
+        lines.append("  🧑‍🏫 Coach: *unassigned*")
 
     if nutr_profile:
         bio_parts = []
@@ -1924,9 +1962,37 @@ async def handle_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return ConversationHandler.END
 
 
+_AVATAR_LABEL = {
+    "powerlifter": "Powerlifter",
+    "powerbuilder": "Powerbuilder",
+    "gen_pop": "General Fitness",
+}
+
+
+def _upd_pick_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎯 Training goal", callback_data="upd:goal")],
+        [InlineKeyboardButton("📅 Days / week", callback_data="upd:days")],
+        [InlineKeyboardButton("💪 Experience", callback_data="upd:exp")],
+        [InlineKeyboardButton("⚠️ Limitations", callback_data="upd:limit")],
+        [InlineKeyboardButton("📧 Email", callback_data="upd:email")],
+        [InlineKeyboardButton("🔄 Regenerate plan with current settings", callback_data="upd:regen")],
+        [InlineKeyboardButton("✅ Done", callback_data="upd:done")],
+    ])
+
+
+def _upd_summary_line(profile: ClientProfile) -> str:
+    return (
+        f"Current: *{_AVATAR_LABEL.get(profile.avatar, profile.avatar)}* · "
+        f"*{profile.training_days}d/wk* · *{profile.experience_level}* · "
+        f"limitations: {', '.join(profile.limitations) if profile.limitations else 'none'} · "
+        f"email: {profile.email or '—'}"
+    )
+
+
 @auth_roles.requires_active_sub
 async def start_update_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Entry point for /update_profile — reuses intake flow with pre-filled values."""
+    """Show a field-picker menu so the client can update one thing at a time."""
     client_id = _current_client_id(update) or str(update.effective_user.id)
     with Session(engine) as session:
         profile = session.get(ClientProfile, client_id)
@@ -1935,26 +2001,261 @@ async def start_update_profile(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("No profile found. Use /start to create one first.")
         return ConversationHandler.END
 
-    context.user_data['update_profile_mode'] = True
-    context.user_data['avatar'] = profile.avatar
-    context.user_data['days'] = profile.training_days
-    context.user_data['experience_level'] = profile.experience_level
-    context.user_data['limitations'] = profile.limitations or []
-
-    avatar_display = {"powerlifter": "Powerlifter", "powerbuilder": "Powerbuilder", "gen_pop": "General Fitness"}.get(profile.avatar, profile.avatar)
-    keyboard = [[
-        InlineKeyboardButton("Powerlifter", callback_data="powerlifter"),
-        InlineKeyboardButton("Powerbuilder", callback_data="powerbuilder"),
-    ], [
-        InlineKeyboardButton("General Fitness", callback_data="gen_pop"),
-    ]]
+    context.user_data["upd_client_id"] = client_id
+    context.user_data["upd_dirty"] = False
     await update.message.reply_text(
-        f"Updating your profile (current: *{avatar_display}*, *{profile.training_days} days*, *{profile.experience_level}*).\n\n"
-        "What is your training goal?",
+        f"What would you like to update?\n\n{_upd_summary_line(profile)}",
         parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        reply_markup=_upd_pick_keyboard(),
     )
-    return ASK_AVATAR
+    return UPD_PICK
+
+
+async def _upd_show_menu(query, client_id: str, dirty_note: "str | None" = None) -> None:
+    with Session(engine) as session:
+        profile = session.get(ClientProfile, client_id)
+    if profile is None:
+        await query.edit_message_text("Profile vanished. /start to recreate.")
+        return
+    head = (dirty_note + "\n\n") if dirty_note else ""
+    await query.edit_message_text(
+        f"{head}What else would you like to update?\n\n{_upd_summary_line(profile)}",
+        parse_mode="Markdown",
+        reply_markup=_upd_pick_keyboard(),
+    )
+
+
+async def upd_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    choice = query.data.split(":", 1)[1]
+    if choice == "done":
+        if context.user_data.pop("upd_dirty", False):
+            await query.edit_message_text(
+                "Saved. Tap /update_profile and pick *🔄 Regenerate plan* if you want a fresh plan.",
+                parse_mode="Markdown",
+            )
+        else:
+            await query.edit_message_text("No changes. Have a good one!")
+        context.user_data.pop("upd_client_id", None)
+        return ConversationHandler.END
+
+    if choice == "regen":
+        return await _upd_regen(update, context)
+
+    if choice == "goal":
+        await query.edit_message_text(
+            "What is your training goal?",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Powerlifter", callback_data="upd_goal:powerlifter")],
+                [InlineKeyboardButton("Powerbuilder", callback_data="upd_goal:powerbuilder")],
+                [InlineKeyboardButton("General Fitness", callback_data="upd_goal:gen_pop")],
+                [InlineKeyboardButton("↩ Back", callback_data="upd_goal:back")],
+            ]),
+        )
+        return UPD_AVATAR
+
+    if choice == "days":
+        await query.edit_message_text(
+            "How many days per week can you train?",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("3", callback_data="upd_days:3"),
+                 InlineKeyboardButton("4", callback_data="upd_days:4")],
+                [InlineKeyboardButton("5", callback_data="upd_days:5"),
+                 InlineKeyboardButton("6", callback_data="upd_days:6")],
+                [InlineKeyboardButton("↩ Back", callback_data="upd_days:back")],
+            ]),
+        )
+        return UPD_DAYS
+
+    if choice == "exp":
+        await query.edit_message_text(
+            "What is your experience level?",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Beginner", callback_data="upd_exp:beginner")],
+                [InlineKeyboardButton("Intermediate", callback_data="upd_exp:intermediate")],
+                [InlineKeyboardButton("Advanced", callback_data="upd_exp:advanced")],
+                [InlineKeyboardButton("↩ Back", callback_data="upd_exp:back")],
+            ]),
+        )
+        return UPD_EXP
+
+    if choice == "limit":
+        context.user_data["selected_limitations"] = set(
+            _load_profile_limitations(context.user_data["upd_client_id"])
+        )
+        await query.edit_message_text(
+            "Select any injuries or limitations:",
+            reply_markup=_build_limitations_keyboard(context.user_data["selected_limitations"]),
+        )
+        return UPD_LIM
+
+    if choice == "email":
+        await query.edit_message_text(
+            "Send your new email address (we'll use it for the plan PDF). Type /cancel to abort."
+        )
+        return UPD_EMAIL
+
+    return UPD_PICK
+
+
+def _load_profile_limitations(client_id: str) -> list:
+    with Session(engine) as session:
+        profile = session.get(ClientProfile, client_id)
+    return list(profile.limitations or []) if profile else []
+
+
+def _save_profile_field(client_id: str, **kwargs) -> None:
+    with Session(engine, expire_on_commit=False) as session:
+        profile = session.get(ClientProfile, client_id)
+        if profile is None:
+            return
+        for k, v in kwargs.items():
+            setattr(profile, k, v)
+        session.add(profile)
+        session.commit()
+
+
+async def upd_set_goal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    pick = query.data.split(":", 1)[1]
+    client_id = context.user_data["upd_client_id"]
+    if pick == "back":
+        await _upd_show_menu(query, client_id)
+        return UPD_PICK
+    _save_profile_field(client_id, avatar=pick)
+    context.user_data["upd_dirty"] = True
+    await _upd_show_menu(query, client_id, dirty_note=f"✅ Goal set to *{_AVATAR_LABEL.get(pick, pick)}*.")
+    return UPD_PICK
+
+
+async def upd_set_days(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    pick = query.data.split(":", 1)[1]
+    client_id = context.user_data["upd_client_id"]
+    if pick == "back":
+        await _upd_show_menu(query, client_id)
+        return UPD_PICK
+    _save_profile_field(client_id, training_days=int(pick))
+    context.user_data["upd_dirty"] = True
+    await _upd_show_menu(query, client_id, dirty_note=f"✅ Training days set to *{pick}/wk*.")
+    return UPD_PICK
+
+
+async def upd_set_exp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    pick = query.data.split(":", 1)[1]
+    client_id = context.user_data["upd_client_id"]
+    if pick == "back":
+        await _upd_show_menu(query, client_id)
+        return UPD_PICK
+    _save_profile_field(client_id, experience_level=pick)
+    context.user_data["upd_dirty"] = True
+    await _upd_show_menu(query, client_id, dirty_note=f"✅ Experience set to *{pick}*.")
+    return UPD_PICK
+
+
+async def upd_lim_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    opt = query.data[len("lim_toggle_"):]
+    selected: set = context.user_data.get("selected_limitations", set())
+    if opt == "none":
+        selected = {"none"} if "none" not in selected else set()
+    else:
+        selected.discard("none")
+        if opt in selected:
+            selected.discard(opt)
+        else:
+            selected.add(opt)
+    context.user_data["selected_limitations"] = selected
+    await query.edit_message_reply_markup(reply_markup=_build_limitations_keyboard(selected))
+    return UPD_LIM
+
+
+async def upd_lim_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    selected: set = context.user_data.get("selected_limitations", set())
+    client_id = context.user_data["upd_client_id"]
+    if "other" in selected:
+        selected.discard("other")
+        context.user_data["_upd_lim_pending"] = sorted(s for s in selected if s != "none")
+        await query.edit_message_text(
+            "Describe your limitation in one sentence (e.g. 'recovering from ankle sprain'):"
+        )
+        return UPD_LIM_OTHER
+    new_limits = [] if ("none" in selected or not selected) else sorted(selected)
+    _save_profile_field(client_id, limitations=new_limits, limitations_notes=None)
+    context.user_data["upd_dirty"] = True
+    label = "none" if not new_limits else ", ".join(new_limits)
+    await _upd_show_menu(query, client_id, dirty_note=f"✅ Limitations set to: *{label}*.")
+    return UPD_PICK
+
+
+async def upd_lim_other(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    note = (update.message.text or "").strip()[:200]
+    client_id = context.user_data["upd_client_id"]
+    base = context.user_data.pop("_upd_lim_pending", [])
+    _save_profile_field(client_id, limitations=base, limitations_notes=note)
+    context.user_data["upd_dirty"] = True
+    with Session(engine) as session:
+        profile = session.get(ClientProfile, client_id)
+    if profile is None:
+        await update.message.reply_text("Profile vanished.")
+        return ConversationHandler.END
+    await update.message.reply_text(
+        f"✅ Limitation note saved.\n\nWhat else would you like to update?\n\n{_upd_summary_line(profile)}",
+        parse_mode="Markdown",
+        reply_markup=_upd_pick_keyboard(),
+    )
+    return UPD_PICK
+
+
+async def upd_set_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    email = (update.message.text or "").strip()
+    if "@" not in email or len(email) > 200:
+        await update.message.reply_text("That doesn't look like an email. Send again or /cancel.")
+        return UPD_EMAIL
+    client_id = context.user_data["upd_client_id"]
+    _save_profile_field(client_id, email=email)
+    context.user_data["upd_dirty"] = True
+    with Session(engine) as session:
+        profile = session.get(ClientProfile, client_id)
+    if profile is None:
+        await update.message.reply_text("Profile vanished.")
+        return ConversationHandler.END
+    await update.message.reply_text(
+        f"✅ Email updated.\n\nWhat else?\n\n{_upd_summary_line(profile)}",
+        parse_mode="Markdown",
+        reply_markup=_upd_pick_keyboard(),
+    )
+    return UPD_PICK
+
+
+async def _upd_regen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    client_id = context.user_data["upd_client_id"]
+    with Session(engine) as session:
+        profile = session.get(ClientProfile, client_id)
+    if profile is None:
+        await query.edit_message_text("Profile vanished.")
+        return ConversationHandler.END
+    await query.edit_message_text("⏳ Generating a fresh plan with your current settings...")
+    await run_generation_and_dispatch(
+        context=context,
+        client_chat_id=update.effective_chat.id,
+        client_user_id=client_id,
+        client_first_name=update.effective_user.first_name or "",
+        client_email=profile.email or "",
+        profile=profile,
+    )
+    context.user_data.pop("upd_client_id", None)
+    context.user_data.pop("upd_dirty", None)
+    return ConversationHandler.END
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -4415,10 +4716,21 @@ def main():
         per_message=False,
     ))
 
-    # ── Update profile ──
+    # ── Update profile (field picker) ──
     app.add_handler(ConversationHandler(
         entry_points=[CommandHandler("update_profile", start_update_profile)],
-        states=_intake_states,
+        states={
+            UPD_PICK: [CallbackQueryHandler(upd_pick, pattern=r"^upd:")],
+            UPD_AVATAR: [CallbackQueryHandler(upd_set_goal, pattern=r"^upd_goal:")],
+            UPD_DAYS: [CallbackQueryHandler(upd_set_days, pattern=r"^upd_days:")],
+            UPD_EXP: [CallbackQueryHandler(upd_set_exp, pattern=r"^upd_exp:")],
+            UPD_LIM: [
+                CallbackQueryHandler(upd_lim_toggle, pattern=r"^lim_toggle_"),
+                CallbackQueryHandler(upd_lim_confirm, pattern=r"^lim_confirm$"),
+            ],
+            UPD_LIM_OTHER: [MessageHandler(filters.TEXT & ~filters.COMMAND, upd_lim_other)],
+            UPD_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, upd_set_email)],
+        },
         fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
     ))
