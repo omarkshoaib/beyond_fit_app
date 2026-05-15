@@ -35,7 +35,9 @@ from tests.conftest import make_callback_update, make_context, make_text_update
 # ── Shared test constants ──────────────────────────────────────────────────────
 
 USER_ID = 123456
-ADMIN_ID = "999"
+# Test admin == the user under test so legacy admin-check passes; the
+# SaaS scope check (_user_can_act_on_client) reads this via os.getenv("ADMIN_TELEGRAM_ID").
+ADMIN_ID = str(USER_ID)
 
 # Minimal ClientProfile used across tests
 _BASE_PROFILE = dict(
@@ -98,6 +100,7 @@ async def test_intake_creates_profile(test_engine, mock_bot):
         "days": 3,
         "experience_level": "beginner",
         "limitations": [],
+        "intake_client_id": str(USER_ID),  # post-SaaS handle_email refuses without this
     })
 
     await handle_email(update, ctx)
@@ -121,6 +124,7 @@ async def test_intake_creates_pending_approval(test_engine, mock_bot):
         "days": 3,
         "experience_level": "beginner",
         "limitations": [],
+        "intake_client_id": str(USER_ID),
     })
 
     await handle_email(update, ctx)

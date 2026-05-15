@@ -53,14 +53,36 @@ logging.basicConfig(
 def _resolve_review_recipient(client_id: str) -> int | None:
     """Where to DM a plan-approval message for this client.
 
-    Prefers the client's assigned coach (Phase H scope). Falls back to the
-    super-admin for unassigned clients so plans don't go unreviewed.
+    Prefers the client's assigned coach (Phase H scope) **only if the coach
+    is still approved**. Falls back to the super-admin if the coach was
+    rejected, removed, or never set, so plans don't go unreviewed.
     """
     with Session(engine) as session:
         client = session.get(ClientProfile, client_id)
+        coach = None
+        if client is not None and client.assigned_coach_id is not None:
+            coach = session.get(CoachProfile, client.assigned_coach_id)
+    if coach is not None and coach.status == "approved":
+        return coach.telegram_user_id
     if client is not None and client.assigned_coach_id is not None:
-        return client.assigned_coach_id
+        logging.warning(
+            "coach_routing_stale client_id=%s assigned_coach_id=%s coach_status=%s",
+            client_id, client.assigned_coach_id,
+            coach.status if coach else "missing",
+        )
     return auth_roles.super_admin_user_id() or _admin_chat_id()
+
+
+def _user_can_act_on_client(user_id: int, client_id: str) -> bool:
+    """Phase H scope check: super-admin sees all; coaches act only on assigned clients."""
+    legacy_admin = _admin_chat_id()
+    if auth_roles.is_super_admin(user_id) or (legacy_admin is not None and user_id == legacy_admin):
+        return True
+    if not auth_roles.is_coach(user_id):
+        return False
+    with Session(engine) as session:
+        profile = session.get(ClientProfile, client_id)
+    return profile is not None and profile.assigned_coach_id == user_id
 
 
 def _admin_chat_id() -> int | None:
@@ -1904,7 +1926,13 @@ async def handle_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     # Post-verify intake stashes the real client_id; otherwise look up by chat binding.
     intake_client_id = context.user_data.get('intake_client_id')
     client = auth_roles.get_authenticated_client(update.effective_chat.id)
-    client_id = intake_client_id or (client.client_id if client else str(update.effective_user.id))
+    client_id = intake_client_id or (client.client_id if client else None)
+    if client_id is None:
+        await update.message.reply_text(
+            "Your chat isn't linked to an account yet. Tap /start → Subscribe to pay, "
+            "or /start → I have an account already to log in with your access code."
+        )
+        return ConversationHandler.END
 
     # If the row was created at pay_verify, it already exists — treat as update.
     with Session(engine, expire_on_commit=False) as session:
@@ -2819,10 +2847,16 @@ async def handle_updates_text(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def _ask_formcheck_exercise(msg_or_query, context, edit: bool) -> int:
     """Build exercise list from the client's current plan and present as inline keyboard."""
-    client_id = str(
-        msg_or_query.from_user.id if hasattr(msg_or_query, "from_user")
-        else msg_or_query.message.from_user.id
-    )
+    chat_id = msg_or_query.message.chat_id if hasattr(msg_or_query, "message") else msg_or_query.chat.id
+    client = auth_roles.get_authenticated_client(chat_id)
+    if client is None:
+        text = "Your chat isn't linked to an account yet. Tap /start to subscribe or log in."
+        if edit:
+            await msg_or_query.edit_message_text(text)
+        else:
+            await msg_or_query.message.reply_text(text)
+        return ConversationHandler.END
+    client_id = client.client_id
 
     exercises = []
     with Session(engine, expire_on_commit=False) as session:
@@ -2896,9 +2930,10 @@ async def handle_formcheck_mode(update: Update, context: ContextTypes.DEFAULT_TY
     if query.data == "fc_mode_tips":
         await query.edit_message_text(f"⏳ Generating technique tips for *{ex_name}*...", parse_mode="Markdown")
 
-        client_id = str(query.from_user.id)
+        client = auth_roles.get_authenticated_client(query.message.chat_id)
+        client_id = client.client_id if client else ""
         with Session(engine, expire_on_commit=False) as session:
-            profile = session.get(ClientProfile, client_id)
+            profile = session.get(ClientProfile, client_id) if client_id else None
             exp = profile.experience_level if profile else "intermediate"
             avatar = profile.avatar if profile else "gen_pop"
 
@@ -3616,6 +3651,13 @@ async def handle_admin_approve(update: Update, context: ContextTypes.DEFAULT_TYP
         if not pending:
             await query.edit_message_text("❌ Plan no longer pending.")
             return
+        if not _user_can_act_on_client(update.effective_user.id, pending.client_id):
+            logging.warning(
+                "coach_scope_violation handler=approve user_id=%s client_id=%s approval_id=%s",
+                update.effective_user.id, pending.client_id, approval_id,
+            )
+            await query.edit_message_text("🔒 Not authorized for this client.")
+            return
         client_name = pending.client_name or pending.client_id
         workout = WorkoutWeek.model_validate_json(pending.workout_json)
         edit_count = len(pending.edit_log or [])
@@ -3813,6 +3855,18 @@ async def handle_admin_approve_confirmed(update: Update, context: ContextTypes.D
     query = update.callback_query
     await query.answer()
     approval_id = query.data.split(":")[1]
+    with Session(engine) as session:
+        pending = session.get(PendingApproval, approval_id)
+    if pending is None:
+        await query.edit_message_text("❌ Plan no longer pending.")
+        return
+    if not _user_can_act_on_client(update.effective_user.id, pending.client_id):
+        logging.warning(
+            "coach_scope_violation handler=approve_confirmed user_id=%s client_id=%s approval_id=%s",
+            update.effective_user.id, pending.client_id, approval_id,
+        )
+        await query.edit_message_text("🔒 Not authorized for this client.")
+        return
     await _do_approve_confirmed(query, approval_id, context)
 
 
@@ -3825,6 +3879,13 @@ async def handle_admin_reject(update: Update, context: ContextTypes.DEFAULT_TYPE
         pending = session.get(PendingApproval, approval_id)
         if not pending:
             await query.edit_message_text("❌ Plan no longer pending.")
+            return ConversationHandler.END
+        if not _user_can_act_on_client(update.effective_user.id, pending.client_id):
+            logging.warning(
+                "coach_scope_violation handler=reject user_id=%s client_id=%s approval_id=%s",
+                update.effective_user.id, pending.client_id, approval_id,
+            )
+            await query.edit_message_text("🔒 Not authorized for this client.")
             return ConversationHandler.END
 
     context.user_data['reject_uuid'] = approval_id
@@ -3840,6 +3901,13 @@ async def handle_admin_feedback(update: Update, context: ContextTypes.DEFAULT_TY
         pending = session.get(PendingApproval, approval_id)
         if not pending:
             await update.message.reply_text("❌ Session expired.")
+            return ConversationHandler.END
+        if not _user_can_act_on_client(update.effective_user.id, pending.client_id):
+            logging.warning(
+                "coach_scope_violation handler=feedback user_id=%s client_id=%s approval_id=%s",
+                update.effective_user.id, pending.client_id, approval_id,
+            )
+            await update.message.reply_text("🔒 Not authorized for this client.")
             return ConversationHandler.END
 
         await update.message.reply_text("⏳ Applying edits...")
@@ -4104,6 +4172,13 @@ async def handle_open_pending_item(update: Update, context: ContextTypes.DEFAULT
         pending = session.get(PendingApproval, approval_id)
         if not pending:
             await query.edit_message_text("❌ Plan no longer pending.")
+            return
+        if not _user_can_act_on_client(update.effective_user.id, pending.client_id):
+            logging.warning(
+                "coach_scope_violation handler=open_pending user_id=%s client_id=%s approval_id=%s",
+                update.effective_user.id, pending.client_id, approval_id,
+            )
+            await query.edit_message_text("🔒 Not authorized for this client.")
             return
 
     workout = WorkoutWeek.model_validate_json(pending.workout_json)
