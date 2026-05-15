@@ -25,6 +25,7 @@ from app.bot import (
 from app.domain.checkin.schema import CheckInExtraction, ExerciseFeedback
 from app.generator import WorkoutGenerator
 from app.models import (
+    ChatBinding,
     ClientProfile,
     PendingApproval,
     WorkoutHistory,
@@ -74,7 +75,8 @@ def apply_patches():
 # ── Helper: seed a generated week into the DB ──────────────────────────────────
 
 def _seed_profile_and_history(test_engine) -> tuple[ClientProfile, WorkoutHistory]:
-    """Insert a ClientProfile and one active WorkoutHistory into the test DB."""
+    """Insert a ClientProfile, ChatBinding (so _current_client_id resolves),
+    and one active WorkoutHistory into the test DB."""
     profile = ClientProfile(**_BASE_PROFILE)
     week = WorkoutGenerator().generate(profile)
     history = WorkoutHistory(
@@ -85,6 +87,7 @@ def _seed_profile_and_history(test_engine) -> tuple[ClientProfile, WorkoutHistor
     )
     with Session(test_engine) as session:
         session.add(profile)
+        session.add(ChatBinding(chat_id=USER_ID, client_id=profile.client_id, is_primary=True))
         session.add(history)
         session.commit()
         session.refresh(history)

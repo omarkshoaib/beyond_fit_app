@@ -131,8 +131,14 @@ def find_client_by_access_code(code: str) -> Optional[str]:
 
 def has_active_subscription(client_id: str) -> bool:
     """True if the client has at least one Subscription with status='active' and
-    ends_at in the future."""
-    now = datetime.now(timezone.utc)
+    ends_at in the future.
+
+    Compares with a naive-UTC datetime because Subscription.ends_at is stored
+    as `timestamp without time zone` on Postgres (and naive on SQLite). Mixing
+    tz-aware and tz-naive comparison values against this column produces
+    implementation-defined behaviour across drivers.
+    """
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     with Session(engine) as session:
         row = session.exec(
             select(Subscription).where(

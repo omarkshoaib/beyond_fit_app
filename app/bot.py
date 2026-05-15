@@ -939,13 +939,23 @@ async def handle_payment_verify(update: Update, context: ContextTypes.DEFAULT_TY
             created_at=now,
         ))
 
-        # 4. Bind the originating chat as primary.
-        session.add(ChatBinding(
-            chat_id=chat_id,
-            client_id=client_id,
-            bound_at=now,
-            is_primary=True,
-        ))
+        # 4. Bind the originating chat as primary (idempotent — if the chat is
+        # already bound to a *different* client we keep the existing row and log).
+        existing_binding = session.exec(
+            select(ChatBinding).where(ChatBinding.chat_id == chat_id)
+        ).first()
+        if existing_binding is None:
+            session.add(ChatBinding(
+                chat_id=chat_id,
+                client_id=client_id,
+                bound_at=now,
+                is_primary=True,
+            ))
+        elif existing_binding.client_id != client_id:
+            logging.warning(
+                "chat_rebind_conflict_at_verify chat_id=%s existing_client_id=%s new_client_id=%s",
+                chat_id, existing_binding.client_id, client_id,
+            )
 
         # 5. Mark Payment verified.
         payment.status = "verified"
@@ -1638,8 +1648,13 @@ _REMINDER_KINDS = (("d7", 7), ("d3", 3), ("d1", 1))
 
 
 def _utc_naive_now() -> datetime:
-    """SQLite returns naive datetimes — keep arithmetic naive-naive everywhere."""
-    return datetime.utcnow()
+    """Canonical naive-UTC clock for columns stored as `timestamp without time zone`.
+
+    Subscription.ends_at, ReminderLog.sent_at and friends are stored naive on
+    Postgres. Comparing them to tz-aware values from datetime.now(timezone.utc)
+    is implementation-defined across drivers — always use this helper.
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _as_naive(dt: datetime | None) -> datetime | None:
@@ -1691,7 +1706,7 @@ async def _emit_reminder_window(bot, kind: str, window_start: datetime, window_e
             try:
                 session.add(ReminderLog(
                     subscription_id=sub.id, kind=kind,
-                    sent_at=datetime.now(timezone.utc),
+                    sent_at=_utc_naive_now(),
                 ))
                 session.commit()
                 logging.info(
@@ -1775,7 +1790,7 @@ async def expire_subscriptions(context) -> None:
             try:
                 session.add(ReminderLog(
                     subscription_id=sub_id, kind=sent_kind,
-                    sent_at=datetime.now(timezone.utc),
+                    sent_at=_utc_naive_now(),
                 ))
                 session.commit()
             except Exception:
@@ -2021,7 +2036,7 @@ def _upd_summary_line(profile: ClientProfile) -> str:
 @auth_roles.requires_active_sub
 async def start_update_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Show a field-picker menu so the client can update one thing at a time."""
-    client_id = _current_client_id(update) or str(update.effective_user.id)
+    client_id = _current_client_id(update)
     with Session(engine) as session:
         profile = session.get(ClientProfile, client_id)
 
@@ -2304,7 +2319,7 @@ def _make_llm_client() -> OpenRouterClient:
 
 @auth_roles.requires_assigned_coach
 async def start_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    client_id = _current_client_id(update) or str(update.effective_user.id)
+    client_id = _current_client_id(update)
 
     # Check for a resumable in-progress structured check-in (<2h old)
     with Session(engine) as session:
@@ -2553,7 +2568,7 @@ async def handle_structured_rpe(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data["checkin_structured_results"].setdefault(slot["exercise_id"], {})["rpe"] = rpe_val
 
     # Persist progress so check-in can be resumed
-    _persist_checkin_progress(_current_client_id(update) or str(update.effective_user.id), context)
+    _persist_checkin_progress(_current_client_id(update), context)
 
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("✅ No pain", callback_data="pain_none"),
@@ -2644,7 +2659,7 @@ async def _process_checkin(
     skip_clarify: bool = False,
 ) -> int:
     """Extract, optionally clarify, write telemetry, run generation."""
-    client_id = _current_client_id(update) or str(update.effective_user.id)
+    client_id = _current_client_id(update)
     raw_text = "\n".join(context.user_data.get("checkin_messages", []))
 
     if not raw_text.strip():
@@ -2831,7 +2846,7 @@ async def handle_post_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 async def handle_updates_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     admin_chat_id = _admin_chat_id()
     if admin_chat_id is not None:
-        summary = _build_client_summary(_current_client_id(update) or str(update.effective_user.id))
+        summary = _build_client_summary(_current_client_id(update))
         admin_text = (
             f"📬 *Message from client*\n\n"
             f"{summary}\n\n"
@@ -2986,7 +3001,7 @@ async def handle_formcheck_mode(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def handle_formcheck_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     ex_name = context.user_data.get("formcheck_exercise_name", "exercise")
-    fallback_id = _current_client_id(update) or str(update.effective_user.id)
+    fallback_id = _current_client_id(update)
 
     if not update.message.video and not update.message.document:
         await update.message.reply_text("Please send a video file. Try again or /cancel.")
@@ -3363,7 +3378,7 @@ async def _submit_nutrition(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     """Persist NutritionProfile, generate plan, notify admin."""
     from app.services.nutrition_service import NutritionService
 
-    client_id = _current_client_id(update) or str(update.effective_user.id)
+    client_id = _current_client_id(update)
     data = _dn(context)
 
     await update.message.reply_text("⏳ Building your personalised nutrition plan...")
@@ -3400,7 +3415,7 @@ async def _submit_nutrition(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             InlineKeyboardButton("✅ Activate plan", callback_data=f"nutrapprove:{plan.id}"),
             InlineKeyboardButton("❌ Discard", callback_data=f"nutrdiscard:{plan.id}"),
         ]]
-        summary = _build_client_summary(_current_client_id(update) or str(update.effective_user.id))
+        summary = _build_client_summary(_current_client_id(update))
         admin_text = (
             f"🥗 *Nutrition plan ready for approval*\n\n"
             f"{summary}\n\n"
@@ -3962,7 +3977,7 @@ async def cancel_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 @auth_roles.requires_assigned_coach
 async def client_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show today's session by default; /plan week shows the full week."""
-    client_id = _current_client_id(update) or str(update.effective_user.id)
+    client_id = _current_client_id(update)
     show_week = (
         context.args
         and context.args[0].lower() == "week"
@@ -4035,7 +4050,7 @@ async def handle_plan_full_week(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await query.answer()
 
-    client_id = _current_client_id(update) or str(update.effective_user.id)
+    client_id = _current_client_id(update)
     with Session(engine) as session:
         history = session.exec(
             select(WorkoutHistory)
@@ -4356,7 +4371,7 @@ async def handle_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> No
 @auth_roles.requires_assigned_coach
 async def start_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """/log — manually log weight/RPE for any exercise in the active plan."""
-    client_id = _current_client_id(update) or str(update.effective_user.id)
+    client_id = _current_client_id(update)
 
     with Session(engine) as session:
         history = session.exec(
@@ -4473,7 +4488,7 @@ async def check_plan_acknowledgment(update: Update, context: ContextTypes.DEFAUL
     if any(k in context.user_data for k in _active_conversation_keys):
         return
 
-    client_id = _current_client_id(update) or str(update.effective_user.id)
+    client_id = _current_client_id(update)
     now = datetime.now(timezone.utc)
 
     with Session(engine) as session:
@@ -4703,9 +4718,15 @@ def main():
         logging.error("No TELEGRAM_BOT_TOKEN found.")
         return
 
-    admin_id = _admin_chat_id()
-    if admin_id is None:
-        logging.error("ADMIN_CHAT_ID not set — admin commands will not work")
+    super_admin = auth_roles.super_admin_user_id()
+    if super_admin is None:
+        logging.error(
+            "FATAL: neither SUPER_ADMIN_TELEGRAM_USER_ID nor ADMIN_CHAT_ID is set. "
+            "Payment verifications, coach applications, and assignment requests "
+            "cannot be routed. Refusing to start — set one of these env vars."
+        )
+        return
+    logging.info("Super-admin telegram_user_id resolved to %s", super_admin)
 
     create_db_and_tables()
     app = ApplicationBuilder().token(token).build()

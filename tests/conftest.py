@@ -32,9 +32,12 @@ def test_engine(tmp_path):
 
 @pytest.fixture(autouse=True)
 def patch_engine(test_engine, monkeypatch):
-    """Replace the global engine in app.bot with the test engine."""
+    """Replace the global engine in app.bot and app.auth.roles with the test engine."""
     import app.bot as bot_mod
+    import app.auth.roles as roles_mod
     monkeypatch.setattr(bot_mod, "engine", test_engine)
+    monkeypatch.setattr(roles_mod, "engine", test_engine)
+    roles_mod.invalidate_coach_cache()
 
 
 # ── PTB mock fixtures ──────────────────────────────────────────────────────────
