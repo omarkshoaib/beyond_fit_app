@@ -3,13 +3,13 @@ import uuid
 import json
 import signal
 import hashlib
+import html as _html
 import logging
 import traceback
 import time
 from collections import defaultdict
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.helpers import escape_markdown
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -627,12 +627,11 @@ async def handle_payment_screenshot(update: Update, context: ContextTypes.DEFAUL
         return ConversationHandler.END
 
     months = "1 month" if plan_type == "1m" else "3 months"
-    safe_name = escape_markdown(sender_name, version=1)
     caption = (
-        f"💳 *Payment pending* (id `{payment_id}`)\n"
-        f"From: *{safe_name}* (chat `{chat_id}`)\n"
+        f"💳 <b>Payment pending</b> (id <code>{payment_id}</code>)\n"
+        f"From: <b>{_html.escape(sender_name)}</b> (chat <code>{chat_id}</code>)\n"
         f"Plan: {months} — EGP {amount}\n"
-        f"Tentative client_id: `{client_id}`"
+        f"Tentative client_id: <code>{_html.escape(client_id)}</code>"
     )
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("✅ Verify", callback_data=f"pay_verify:{payment_id}"),
@@ -642,7 +641,7 @@ async def handle_payment_screenshot(update: Update, context: ContextTypes.DEFAUL
         chat_id=sa_id,
         photo=file_id,
         caption=caption,
-        parse_mode="Markdown",
+        parse_mode="HTML",
         reply_markup=keyboard,
     )
 
@@ -1164,17 +1163,17 @@ async def coach_apply_portfolio(update: Update, context: ContextTypes.DEFAULT_TY
     sa_id = auth_roles.super_admin_user_id()
     if sa_id is not None:
         spec_label = dict(_COACH_SPECIALTIES).get(coach.specialty, coach.specialty)
-        _esc = lambda s: escape_markdown(s or "", version=1)
+        _e = lambda s: _html.escape(str(s or ""))
         bundle = (
-            "🧑‍🏫 *New coach application*\n"
-            f"• Name: *{_esc(coach.name)}*\n"
-            f"• Email: `{coach.email}`\n"
-            f"• Mobile: `{coach.mobile}`\n"
-            f"• Specialty: {_esc(spec_label)}\n"
+            "🧑‍🏫 <b>New coach application</b>\n"
+            f"• Name: <b>{_e(coach.name)}</b>\n"
+            f"• Email: <code>{_e(coach.email)}</code>\n"
+            f"• Mobile: <code>{_e(coach.mobile)}</code>\n"
+            f"• Specialty: {_e(spec_label)}\n"
             f"• Experience: {coach.years_experience} years\n"
-            f"• Certifications: {_esc(coach.certifications)}\n"
-            f"• Portfolio: {_esc(portfolio) or '—'}\n"
-            f"• Telegram user id: `{user_id}`"
+            f"• Certifications: {_e(coach.certifications)}\n"
+            f"• Portfolio: {_e(portfolio) or '—'}\n"
+            f"• Telegram user id: <code>{user_id}</code>"
         )
         keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("✅ Approve", callback_data=f"coach_verify:{user_id}"),
@@ -1182,7 +1181,7 @@ async def coach_apply_portfolio(update: Update, context: ContextTypes.DEFAULT_TY
         ]])
         try:
             await context.bot.send_message(
-                chat_id=sa_id, text=bundle, parse_mode="Markdown", reply_markup=keyboard,
+                chat_id=sa_id, text=bundle, parse_mode="HTML", reply_markup=keyboard,
             )
             if coach.cv_file_id is not None:
                 await context.bot.send_document(
