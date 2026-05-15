@@ -124,14 +124,41 @@ async def test_start_unbound_chat_shows_menu(monkeypatch, test_engine, mock_bot)
 @pytest.mark.asyncio
 async def test_start_bound_chat_skips_menu(monkeypatch, test_engine, mock_bot):
     _patch_roles(monkeypatch, test_engine)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     with Session(test_engine) as s:
         s.add(ClientProfile(client_id="cl_x", avatar="gen_pop", training_days=3))
         s.add(ChatBinding(chat_id=999, client_id="cl_x", is_primary=True))
+        # Bound + active sub → "welcome back", not funnel.
+        s.add(Subscription(
+            client_id="cl_x", plan_type="1m",
+            started_at=now, ends_at=now + timedelta(days=20),
+            status="active", created_at=now,
+        ))
         s.commit()
     update = make_text_update(mock_bot, user_id=999, text="/start")
     state = await start_conversation(update, _make_app_context(mock_bot))
     from telegram.ext import ConversationHandler
     assert state == ConversationHandler.END
+
+
+@pytest.mark.asyncio
+async def test_start_bound_chat_with_expired_sub_drops_to_menu(monkeypatch, test_engine, mock_bot):
+    """Item 18 (review) — expired subscription should not show 'Welcome back'."""
+    _patch_roles(monkeypatch, test_engine)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    with Session(test_engine) as s:
+        s.add(ClientProfile(client_id="cl_y", avatar="gen_pop", training_days=3))
+        s.add(ChatBinding(chat_id=1001, client_id="cl_y", is_primary=True))
+        # Expired sub (ends in the past).
+        s.add(Subscription(
+            client_id="cl_y", plan_type="1m",
+            started_at=now - timedelta(days=40), ends_at=now - timedelta(days=10),
+            status="active", created_at=now - timedelta(days=40),
+        ))
+        s.commit()
+    update = make_text_update(mock_bot, user_id=1001, text="/start")
+    state = await start_conversation(update, _make_app_context(mock_bot))
+    assert state == MENU_ROOT
 
 
 # ── Subscribe path ───────────────────────────────────────────────────

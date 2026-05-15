@@ -176,8 +176,13 @@ def generate_unique_access_code(session: Session, max_attempts: int = 4) -> str:
 
 
 def new_client_id() -> str:
-    """Generate an opaque client_id. `cl_` prefix breaks any int() assumption."""
-    return "cl_" + secrets.token_urlsafe(8).rstrip("=").replace("-", "").replace("_", "")[:12]
+    """Generate an opaque client_id.
+
+    Format: ``cl_<12 hex chars>``. Predictable length (15) — token_hex(6) is
+    exactly 12 chars with no url-safe alphabet variability. The `cl_` prefix
+    breaks any `int(client_id)` legacy assumption.
+    """
+    return "cl_" + secrets.token_hex(6)
 
 
 def bind_chat(session: Session, chat_id: int, client_id: str, *, is_primary: bool = False) -> str:

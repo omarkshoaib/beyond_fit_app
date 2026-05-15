@@ -94,6 +94,15 @@ def _resolve_review_recipient(client_id: str) -> int | None:
     return auth_roles.super_admin_user_id() or _admin_chat_id()
 
 
+_EMAIL_RE = __import__("re").compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
+def _looks_like_email(s: str) -> bool:
+    """Minimal but non-trivial email validator. Rejects 'foo@@@', 'a@b' (no dot)
+    and 'hello'. Use at boundaries (intake, /update_profile)."""
+    return bool(_EMAIL_RE.match(s)) and len(s) <= 254
+
+
 def _user_can_act_on_client(user_id: int, client_id: str) -> bool:
     """Phase H scope check: super-admin sees all; coaches act only on assigned clients."""
     legacy_admin = _admin_chat_id()
@@ -210,18 +219,36 @@ FORMCHECK_TIPS_CONFIRM = 101
 _faq_recent_calls: dict[int, list[float]] = defaultdict(list)
 
 
+_FAQ_BUCKET_HARD_CAP = 10_000
+
+
 def _faq_rate_check(chat_id: int) -> bool:
-    """Return True if the chat is allowed another FAQ call. Side effect: records the call."""
+    """Return True if the chat is allowed another FAQ call. Side effect: records the call.
+
+    Prunes empty buckets and caps total bucket count to bound memory if the bot
+    runs for a long time without restart and the FAQ ever sees real volume.
+    """
     settings = get_settings()
     limit = max(1, settings.faq_rate_limit_per_hour)
     window_seconds = 3600.0
     now = time.monotonic()
     bucket = _faq_recent_calls[chat_id]
-    # Drop expired timestamps.
+    # Drop expired timestamps from this caller's bucket.
     bucket[:] = [t for t in bucket if now - t < window_seconds]
     if len(bucket) >= limit:
         return False
     bucket.append(now)
+
+    if len(_faq_recent_calls) > _FAQ_BUCKET_HARD_CAP:
+        # Sweep: drop callers whose entire bucket has rolled out of the window.
+        stale = [c for c, b in _faq_recent_calls.items() if not b or now - b[-1] >= window_seconds]
+        for c in stale:
+            _faq_recent_calls.pop(c, None)
+        if len(_faq_recent_calls) > _FAQ_BUCKET_HARD_CAP:
+            logging.warning(
+                "faq_rate_limiter_overflow buckets=%s — consider a persistent store",
+                len(_faq_recent_calls),
+            )
     return True
 
 
@@ -584,6 +611,15 @@ async def start_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     if client is not None:
         # Returning client (any device bound to this chat).
+        sub_active = auth_roles.has_active_subscription(client.client_id)
+        if not sub_active:
+            await update.message.reply_text(
+                "Welcome back — but your subscription has expired or hasn't started yet. "
+                "Tap /start → 💳 Subscribe to renew, or pick the Subscribe button below."
+            )
+            # Drop them at the funnel menu so they can re-pay or ask a question.
+            return await _show_root_menu(update, context)
+
         with Session(engine, expire_on_commit=False) as session:
             has_history = session.exec(
                 select(WorkoutHistory).where(WorkoutHistory.client_id == client.client_id)
@@ -1131,7 +1167,7 @@ async def coach_apply_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 async def coach_apply_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     email = (update.message.text or "").strip()
-    if "@" not in email or " " in email or len(email) > 120:
+    if not _looks_like_email(email):
         await update.message.reply_text("That doesn't look like a valid email. Try again.")
         return COACH_APPLY_EMAIL
     context.user_data.setdefault("coach_apply", {})["email"] = email
@@ -1340,9 +1376,10 @@ async def handle_coach_verify(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         await context.bot.send_message(
             chat_id=coach_user_id,
-            text=f"✅ Welcome aboard, *{coach.name}*! You've been approved as a coach.\n"
+            text=f"✅ Welcome aboard, <b>{_html.escape(coach.name)}</b>! "
+                 "You've been approved as a coach.\n"
                  "You'll receive client plans for review here.",
-            parse_mode="Markdown",
+            parse_mode="HTML",
         )
     except Exception as err:
         logging.warning("coach_approve dm_failed user_id=%s err=%s", coach_user_id, err)
@@ -1494,9 +1531,10 @@ async def handle_coach_picker_pick(update: Update, context: ContextTypes.DEFAULT
 
     logging.info("coach_assigned client_id=%s coach_id=%s", client_id, coach_id)
 
+    spec = dict(_COACH_SPECIALTIES).get(coach.specialty, coach.specialty)
     await query.edit_message_text(
-        f"✅ Assigned to *{coach.name}* ({dict(_COACH_SPECIALTIES).get(coach.specialty, coach.specialty)}).",
-        parse_mode="Markdown",
+        f"✅ Assigned to <b>{_html.escape(coach.name)}</b> ({_html.escape(spec)}).",
+        parse_mode="HTML",
     )
 
     # Now offer to begin profile setup (only if not yet set up).
@@ -1623,8 +1661,9 @@ async def handle_admin_assign(update: Update, context: ContextTypes.DEFAULT_TYPE
     logging.info("coach_assigned_by_admin client_id=%s coach_id=%s", client_id, coach_id)
 
     await query.edit_message_text(
-        f"✅ Assigned *{coach.name}* to {client.name or client_id}.",
-        parse_mode="Markdown",
+        f"✅ Assigned <b>{_html.escape(coach.name)}</b> to "
+        f"{_html.escape(client.name or client_id)}.",
+        parse_mode="HTML",
     )
 
     # Notify the client.
@@ -1633,8 +1672,8 @@ async def handle_admin_assign(update: Update, context: ContextTypes.DEFAULT_TYPE
         try:
             await context.bot.send_message(
                 chat_id=chat_id,
-                text=f"✅ Coach Shoaib paired you with *{coach.name}*.",
-                parse_mode="Markdown",
+                text=f"✅ Coach Shoaib paired you with <b>{_html.escape(coach.name)}</b>.",
+                parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("👉 Begin setup", callback_data="setup_begin"),
                 ]]),
@@ -2281,7 +2320,7 @@ async def upd_lim_other(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
 async def upd_set_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     email = (update.message.text or "").strip()
-    if "@" not in email or len(email) > 200:
+    if not _looks_like_email(email):
         await update.message.reply_text("That doesn't look like an email. Send again or /cancel.")
         return UPD_EMAIL
     client_id = context.user_data["upd_client_id"]
@@ -3579,29 +3618,52 @@ async def handle_admin_video_reply(update: Update, context: ContextTypes.DEFAULT
     video_reviews = context.application.bot_data.get("video_reviews", {})
     entry = video_reviews.get(replied_id)
     if not entry:
+        # Most common cause: bot was restarted between the forward and the
+        # reply, so the in-memory map evaporated. Tell the coach instead of
+        # silently dropping their feedback.
+        logging.warning(
+            "video_review_entry_missing replied_id=%s coach_user_id=%s — likely lost on restart",
+            replied_id, user_id,
+        )
+        await update.message.reply_text(
+            "⚠️ I couldn't find the video this reply belongs to (the bot may have "
+            "restarted since the video was forwarded). Ask the client to resend "
+            "the form-check video so I can re-link your feedback."
+        )
         return
 
-    # Coach scope: only videos for their assigned clients.
+    # Coach scope: only videos for their assigned clients, and only while still approved.
     if not is_super:
         client_id = entry.get("client_id")
         with Session(engine) as session:
             client = session.get(ClientProfile, client_id) if client_id else None
+            coach = session.get(CoachProfile, user_id)
+        if coach is None or coach.status != "approved":
+            await update.message.reply_text(
+                "🔒 Your coach account is no longer approved — feedback not delivered."
+            )
+            logging.warning(
+                "video_reply_blocked_coach_not_approved user_id=%s status=%s",
+                user_id, coach.status if coach else "missing",
+            )
+            return
         if client is None or client.assigned_coach_id != user_id:
             await update.message.reply_text("🔒 Not your client.")
             return
 
     client_chat_id = entry["client_chat_id"]
     ex_name = entry["exercise_name"]
-    coach_name = update.effective_user.first_name
+    coach_name = update.effective_user.first_name or "your coach"
+    feedback_text = update.message.text or ""
 
     await context.bot.send_message(
         chat_id=client_chat_id,
         text=(
-            f"🎥 *Form check feedback from Coach {coach_name}*\n"
-            f"Exercise: _{ex_name}_\n\n"
-            f"{update.message.text}"
+            f"🎥 <b>Form check feedback from Coach {_html.escape(coach_name)}</b>\n"
+            f"Exercise: <i>{_html.escape(ex_name)}</i>\n\n"
+            f"{_html.escape(feedback_text)}"
         ),
-        parse_mode="Markdown",
+        parse_mode="HTML",
     )
     await update.message.reply_text(f"✅ Feedback sent to {entry['client_name']}.")
 
