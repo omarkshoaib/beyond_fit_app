@@ -20,6 +20,7 @@ from telegram.ext import (
     ConversationHandler,
 )
 from sqlmodel import Session, select
+from pydantic import ValidationError
 
 import tempfile
 from pathlib import Path
@@ -4044,8 +4045,21 @@ async def handle_admin_feedback(update: Update, context: ContextTypes.DEFAULT_TY
                 reply_markup=InlineKeyboardMarkup(keyboard),
             )
         except Exception as exc:
-            logging.error("Coach edit error: %s", exc)
-            await update.message.reply_text("Failed to apply edits. Be more specific.")
+            logging.exception(
+                "apply_coach_edits failed approval_id=%s client_id=%s feedback=%r",
+                approval_id, pending.client_id, feedback,
+            )
+            kind = type(exc).__name__
+            if isinstance(exc, ValueError) and "invalid JSON" in str(exc):
+                reason = "LLM returned malformed JSON."
+            elif isinstance(exc, ValidationError):
+                reason = "LLM output didn't match the workout schema."
+            else:
+                reason = f"{kind}: {str(exc)[:120]}"
+            await update.message.reply_text(
+                f"⚠️ Edit failed — {reason}\n\nTry again with a more specific instruction "
+                f"(e.g. name the day, lift, sets×reps, RPE explicitly)."
+            )
 
     return ConversationHandler.END
 

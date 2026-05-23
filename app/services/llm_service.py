@@ -30,7 +30,7 @@ class FlashCommunicationService:
             load_dotenv()
             api_key = os.getenv("OPENROUTER_API_KEY", "")
             base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-            model_id = os.getenv("LLM_MODEL_ID", "google/gemini-3.1-flash-lite-preview")
+            model_id = os.getenv("LLM_MODEL_ID", "google/gemini-2.5-flash")
             self._llm = OpenRouterClient(api_key=api_key, base_url=base_url, model_id=model_id)
 
     def generate_coaching_message(self, profile: ClientProfile, workout: WorkoutWeek) -> str:
