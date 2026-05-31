@@ -10,6 +10,7 @@ import time
 from collections import defaultdict
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import NetworkError, Conflict, BadRequest
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -4423,14 +4424,58 @@ def _check_rate_limit(client_id: str) -> bool:
 # ── GLOBAL PTB ERROR HANDLER ──────────────────────────────────────────────────
 
 async def handle_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Log all unhandled exceptions and notify the admin (deduplicated, count-edited within 5-min window)."""
-    tb = "".join(traceback.format_exception(type(context.error), context.error, context.error.__traceback__))
+    """Log all unhandled exceptions and notify the admin (deduplicated, count-edited within 5-min window).
+
+    Two error classes are handled specially before the generic traceback-DM path,
+    because both are non-actionable noise that would otherwise flood the admin:
+
+    - ``NetworkError`` (incl. ``TimedOut`` and wrapped ``httpx.ReadError``):
+      transient polling blips. PTB's network_retry_loop already retries and the
+      bot self-recovers — log only, never DM.
+    - ``Conflict`` ("terminated by other getUpdates request"): two processes are
+      polling the same bot token. Operational, not a code bug — send one concise
+      alert (rate-limited 30 min), never the raw traceback.
+    """
+    err = context.error
+    now = time.monotonic()
+    admin_id = _admin_chat_id()
+
+    # Transient network errors: PTB auto-retries. Log, don't alarm.
+    # NOTE: PTB's BadRequest subclasses NetworkError (e.g. "Can't parse entities")
+    # — those are real bugs and must stay on the traceback-DM path, so exclude them.
+    if isinstance(err, NetworkError) and not isinstance(err, BadRequest):
+        logging.warning("transient polling network error: %s", err)
+        return
+
+    # Two pollers on one token. One concise alert per 30 min, no traceback.
+    if isinstance(err, Conflict):
+        logging.error("getUpdates Conflict — another process is polling this token: %s", err)
+        conflict_key = "__conflict__"
+        last = _error_last_sent.get(conflict_key)
+        if last is not None and now - last < 1800:
+            return
+        _error_last_sent[conflict_key] = now
+        _prune_old_entries(_error_last_sent, _error_message_ids, _error_counts)
+        if admin_id is not None:
+            try:
+                await context.bot.send_message(
+                    chat_id=admin_id,
+                    text=(
+                        "⚠️ Conflict: another process is polling this bot token (getUpdates).\n\n"
+                        "Only ONE poller may run per token. Stop any local `python -m app.bot` "
+                        "using the prod token, or remove a duplicate/orphaned container. "
+                        "Use a separate @BotFather dev token for local testing."
+                    ),
+                )
+            except Exception:
+                pass
+        return
+
+    tb = "".join(traceback.format_exception(type(err), err, err.__traceback__))
     logging.error("Unhandled exception:\n%s", tb)
 
-    sig = hashlib.md5(str(context.error)[:200].encode()).hexdigest()
-    now = time.monotonic()
+    sig = hashlib.md5(str(err)[:200].encode()).hexdigest()
     short_tb = tb[-3000:] if len(tb) > 3000 else tb
-    admin_id = _admin_chat_id()
 
     if sig in _error_last_sent and now - _error_last_sent[sig] < 300:
         _error_counts[sig] = _error_counts.get(sig, 1) + 1
