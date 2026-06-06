@@ -39,10 +39,14 @@ class AutoRegulator:
         else:
             corrected_baseline = last_weight + (abs(rpe_error) * 0.04 * last_weight)
             
-        # Add next week stimulus 
+        # Add next week stimulus
         target_jump = next_target_rpe - last_target_rpe
         next_target = corrected_baseline + (target_jump * 0.025 * corrected_baseline)
-        
+
+        # Cap the weekly change to ±10% to match the check-in (derive_plan_delta)
+        # path — an uncapped RPE-error correction could jump ~+20% in one week.
+        next_target = max(last_weight * 0.90, min(last_weight * 1.10, next_target))
+
         return round(next_target / 2.5) * 2.5
 
 # Mapping from primary_muscle tags in the DB to canonical budget keys
@@ -134,9 +138,14 @@ class WorkoutGenerator:
 
     # ── Exercise Filtering ─────────────────────────────────────────
     def _filter_exercises(self, client: ClientProfile, **kwargs) -> List[Exercise]:
+        # `avatars`: the set of avatar tags acceptable for THIS slot. Defaults to the
+        # client's own avatar; callers widen it (e.g. a powerlifter's accessory slots
+        # also accept powerbuilder exercises) so the narrow powerlifter pool does not
+        # collapse a day to 2 thin slots. Competition main lifts stay powerlifter-only.
+        avatars = kwargs.pop("avatars", None) or {client.avatar}
         valid_exercises = []
         for ex in self.exercise_db:
-            if client.avatar not in ex.avatar_tags:
+            if not (set(ex.avatar_tags) & avatars):
                 continue
 
             has_equipment = True
@@ -277,6 +286,14 @@ class WorkoutGenerator:
         max_fat = spec.get("max_fat", 5)
         slot_type = spec.get("type", "isolation")
 
+        # Powerlifter accessory/isolation slots may pull from the (much larger)
+        # powerbuilder pool; only the competition main lift stays powerlifter-only.
+        is_main = "main" in slot_type
+        if client.avatar == "powerlifter" and not is_main:
+            avatars = {"powerlifter", "powerbuilder"}
+        else:
+            avatars = {client.avatar}
+
         def _pick(candidates: List[Exercise]) -> Optional[Exercise]:
             candidates = [c for c in candidates if c.exercise_id not in used_ids]
             if not candidates:
@@ -285,14 +302,15 @@ class WorkoutGenerator:
 
         # Tier 1: pattern + muscle
         if pattern and muscle:
-            ex = _pick(self._filter_exercises(client, pattern=pattern, primary_muscle=muscle,
+            ex = _pick(self._filter_exercises(client, avatars=avatars, pattern=pattern,
+                                              primary_muscle=muscle,
                                               min_fatigue=min_fat, max_fatigue=max_fat))
             if ex:
                 return self._apply_override(ex, client)
 
         # Tier 2: muscle only (drop pattern requirement)
         if muscle:
-            ex = _pick(self._filter_exercises(client, primary_muscle=muscle,
+            ex = _pick(self._filter_exercises(client, avatars=avatars, primary_muscle=muscle,
                                               min_fatigue=min_fat, max_fatigue=max_fat))
             if ex:
                 return self._apply_override(ex, client)
@@ -301,8 +319,21 @@ class WorkoutGenerator:
         if pattern and muscle:
             mg = self._muscle_group(muscle)
             if mg:
-                ex = _pick(self._filter_exercises(client, pattern=pattern, muscle_group=mg,
+                ex = _pick(self._filter_exercises(client, avatars=avatars, pattern=pattern,
+                                                  muscle_group=mg,
                                                   min_fatigue=min_fat, max_fatigue=max_fat))
+                if ex:
+                    return self._apply_override(ex, client)
+
+        # Tier 4: last-resort — any exercise for this muscle (or group), dropping
+        # fatigue bounds, so a day never ends up empty/thin when SOME option exists.
+        if muscle:
+            ex = _pick(self._filter_exercises(client, avatars=avatars, primary_muscle=muscle))
+            if ex:
+                return self._apply_override(ex, client)
+            mg = self._muscle_group(muscle)
+            if mg:
+                ex = _pick(self._filter_exercises(client, avatars=avatars, muscle_group=mg))
                 if ex:
                     return self._apply_override(ex, client)
 
@@ -482,9 +513,33 @@ class WorkoutGenerator:
             trigger = "forced" if force_deload else f"week_{client.week_number}_cycle"
             self.last_generation_notes.append(f"deload_week: RPE={rpe} trigger={trigger}")
 
+        # Per-day budget: split each muscle's weekly cap across the days that train
+        # it, so repeated day-types (e.g. 6-day PPL's two Push days) get symmetric
+        # volume instead of the first occurrence greedily eating the week's budget
+        # and later occurrences collapsing to non-trainable sets.
+        import math
+        templates_cfg = self._cfg.get("day_templates", {})
+        days_training_key: Dict[str, int] = {}
+        for day_name in day_templates:
+            tk = self._template_key(day_name)
+            specs = (templates_cfg.get(tk) or templates_cfg.get("Full_Body_A")
+                     or {"slots": []}).get("slots", [])
+            seen_keys = set()
+            for spec in specs:
+                m = spec.get("muscle")
+                k = self._budget_key(m) if m else None
+                if k:
+                    seen_keys.add(k)
+            for k in seen_keys:
+                days_training_key[k] = days_training_key.get(k, 0) + 1
+
         days = []
         for day_name in day_templates:
-            day = self._fill_slots(day_name, client, budget, rpe, prior_week, force_deload=deload)
+            per_day_budget = {
+                k: math.ceil(cap / max(1, days_training_key.get(k, 1)))
+                for k, cap in budget.items()
+            }
+            day = self._fill_slots(day_name, client, per_day_budget, rpe, prior_week, force_deload=deload)
             days.append(day)
 
         week = WorkoutWeek(week_number=client.week_number, days=days)

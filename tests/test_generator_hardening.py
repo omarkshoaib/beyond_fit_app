@@ -1,0 +1,70 @@
+"""Phase 3 hardening: capped progression, no thin/empty days, balanced repeated days."""
+import itertools
+
+import pytest
+
+from app.generator import WorkoutGenerator, AutoRegulator
+from app.models import ClientProfile
+
+
+def _gen(avatar, days, exp, equipment):
+    c = ClientProfile(client_id="t", avatar=avatar, training_days=days,
+                      experience_level=exp, available_equipment=equipment)
+    return WorkoutGenerator().generate(c)
+
+
+# ── T12: AutoRegulator weekly load jump capped at ±10% ──────────────────────
+
+def test_autoregulator_jump_capped_up():
+    nxt = AutoRegulator.calculate_next_load(last_weight=100, last_target_rpe=8,
+                                            last_actual_rpe=5, next_target_rpe=8)
+    assert nxt <= 110.0 + 1e-6
+
+
+def test_autoregulator_jump_capped_down():
+    nxt = AutoRegulator.calculate_next_load(last_weight=100, last_target_rpe=8,
+                                            last_actual_rpe=10, next_target_rpe=8)
+    assert nxt >= 90.0 - 1e-6
+
+
+# ── T10: powerlifter full_gym splits have no thin days ──────────────────────
+
+@pytest.mark.parametrize("days", [3, 4, 5, 6])
+def test_powerlifter_full_gym_no_thin_days(days):
+    wk = _gen("powerlifter", days, "advanced", ["full_gym"])
+    for day in wk.days:
+        assert len(day.slots) >= 3, f"powerlifter {days}d: {day.day_name} has {len(day.slots)} slots"
+
+
+# ── T11: repeated day-types get balanced volume (6-day full_gym) ────────────
+
+def test_six_day_repeated_days_balanced():
+    wk = _gen("gen_pop", 6, "beginner", ["full_gym"])
+    by_name = {}
+    for day in wk.days:
+        base = day.day_name.rstrip(" 123456").split()[0]  # "Push 2" -> "Push"
+        by_name.setdefault(base, []).append(sum(s.sets for s in day.slots))
+    for base, sets in by_name.items():
+        assert max(sets) - min(sets) <= 3, f"{base} days unbalanced: {sets}"
+    for day in wk.days:
+        assert len(day.slots) >= 3, f"{day.day_name} thin: {len(day.slots)} slots"
+
+
+# ── T14: no EMPTY days for any combo; full_gym/dumbbells stay >= 2 ───────────
+
+def test_no_empty_days_across_all_combos():
+    avatars = ["gen_pop", "powerbuilder", "powerlifter"]
+    gym_eqs = [["full_gym"], ["dumbbells", "bench"]]
+    for a, d, e, eq in itertools.product(avatars, range(3, 7),
+                                         ["beginner", "advanced"], gym_eqs):
+        wk = _gen(a, d, e, eq)
+        for day in wk.days:
+            assert len(day.slots) >= 2, f"{a}/{d}d/{e}/{eq[0]} -> {day.day_name} = {len(day.slots)} slots"
+
+
+def test_bodyweight_has_no_zero_slot_days():
+    """Bodyweight coverage is thinner; require at least no EMPTY (0-slot) days."""
+    for a, d in itertools.product(["gen_pop", "powerbuilder"], range(3, 7)):
+        wk = _gen(a, d, "beginner", ["bodyweight"])
+        for day in wk.days:
+            assert len(day.slots) >= 1, f"{a}/{d}d bodyweight -> {day.day_name} EMPTY"
