@@ -346,8 +346,8 @@ class _DayCard extends StatelessWidget {
             style: TextStyle(color: Colors.grey.shade400, fontSize: 12)),
         children: slots.map((s) {
           final slot = s as Map<String, dynamic>;
-          final exercise = slot['exercise'] as Map? ?? {};
-          final name = exercise['name'] as String? ?? '?';
+          // WorkoutSlot serializes flat: exercise_name, exercise_id, sets, reps, rpe.
+          final name = slot['exercise_name'] as String? ?? '?';
           final sets = slot['sets']?.toString() ?? '?';
           final reps = slot['reps']?.toString() ?? '?';
           final weight = slot['target_weight'];

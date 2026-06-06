@@ -11,10 +11,10 @@
       <span>C <strong>{{ slot.carb_g | round | int }}g</strong></span>
       <span>Fiber <strong>{{ slot.fiber_g | round | int }}g</strong></span>
     </div>
-    {% for food, grams in slot.items %}
+    {% for item in slot['items'] %}
     <div class="food-item-row">
-      <span class="food-item-row__name">{{ food.name }}</span>
-      <span class="food-item-row__amount">{{ grams | round | int }} g</span>
+      <span class="food-item-row__name">{{ item.name }}</span>
+      <span class="food-item-row__amount">{{ item.grams | round | int }} g</span>
     </div>
     {% endfor %}
   </div>

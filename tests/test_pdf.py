@@ -97,11 +97,37 @@ def _make_workout_history() -> WorkoutHistory:
     )
 
 
+def _realistic_day(day_num: int) -> dict:
+    """A day with real slots + items, matching nutrition_service.generate() output."""
+    return {
+        "day": day_num, "kcal": 2400, "protein_g": 180, "fat_g": 80, "carb_g": 240, "fiber_g": 28,
+        "slots": [
+            {
+                "slot_name": "breakfast", "kcal": 600, "protein_g": 40, "fat_g": 20,
+                "carb_g": 60, "fiber_g": 8,
+                "items": [
+                    {"name": "Rolled Oats (dry)", "slug": "oats_rolled", "category": "grain",
+                     "grams": 80, "kcal": 303, "protein_g": 10.4, "fat_g": 5.6, "carb_g": 53.6},
+                    {"name": "Whey Protein Powder", "slug": "whey_protein", "category": "protein",
+                     "grams": 30, "kcal": 120, "protein_g": 24.0, "fat_g": 1.5, "carb_g": 2.4},
+                ],
+            },
+            {
+                "slot_name": "lunch", "kcal": 900, "protein_g": 70, "fat_g": 30,
+                "carb_g": 90, "fiber_g": 12,
+                "items": [
+                    {"name": "Chicken Breast (skinless)", "slug": "chicken_breast", "category": "protein",
+                     "grams": 200, "kcal": 330, "protein_g": 62.0, "fat_g": 7.2, "carb_g": 0.0},
+                    {"name": "White Rice (cooked)", "slug": "white_rice_cooked", "category": "grain",
+                     "grams": 250, "kcal": 325, "protein_g": 6.75, "fat_g": 0.75, "carb_g": 70.0},
+                ],
+            },
+        ],
+    }
+
+
 def _make_nutrition_plan() -> NutritionPlan:
-    plan_json = json.dumps([
-        {"day": 1, "kcal": 2400, "protein_g": 180, "fat_g": 80, "carb_g": 240, "fiber_g": 28},
-        {"day": 2, "kcal": 2400, "protein_g": 180, "fat_g": 80, "carb_g": 240, "fiber_g": 28},
-    ])
+    plan_json = json.dumps([_realistic_day(1), _realistic_day(2)])
     return NutritionPlan(
         id=1,
         client_id="test_user",
@@ -207,6 +233,19 @@ class TestTemplateRendering:
     def test_nutrition_macros_in_html(self):
         html = self._render_html()
         assert "2400" in html  # kcal target
+
+    def test_meal_card_renders_food_items(self):
+        """Regression: meal card must render per-food rows (slot['items'] dicts),
+        not crash on slot.items resolving to the dict method."""
+        html = self._render_html()
+        assert "Chicken Breast (skinless)" in html
+        assert "Rolled Oats (dry)" in html
+
+    def test_shopping_list_renders_total_grams(self):
+        """Regression: shopping list reads total_grams (renderer key), not total_g."""
+        html = self._render_html()
+        # chicken appears once per day x 2 days x 200g = 400g aggregated
+        assert "400" in html
 
     def test_no_workout_renders_nutrition_only(self):
         env = _make_jinja_env()
