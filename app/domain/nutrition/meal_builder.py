@@ -306,6 +306,15 @@ _MEAL_NAMES: dict[int, list[str]] = {
     6: ["breakfast", "mid_morning", "lunch", "afternoon_snack", "dinner", "evening_snack"],
 }
 
+# Foods are tagged with the canonical slots breakfast/lunch/dinner/snack. The 5/6-meal
+# layouts add named snack slots; map them to "snack" food eligibility so they draw real
+# (carb-bearing) snack foods instead of falling through to the first 3 proteins.
+_SLOT_TO_FOOD_SLOT: dict[str, str] = {
+    "mid_morning": "snack",
+    "afternoon_snack": "snack",
+    "evening_snack": "snack",
+}
+
 
 def build_day_plan(
     food_pool: list[FoodItem],
@@ -342,10 +351,14 @@ def build_day_plan(
         slot_fat     = target_fat_g   * split
         slot_carb    = target_carb_g  * split
 
+        # Named snack slots (mid_morning/afternoon_snack/evening_snack) match foods
+        # tagged "snack"; canonical slots match their own name.
+        food_slot = _SLOT_TO_FOOD_SLOT.get(slot_name, slot_name)
+
         # Pick a balanced selection: 1 protein + 1 starch + 1 veg + 1 fat (when available)
         def _pick(cat: str, n: int = 1) -> list[FoodItem]:
             candidates = [f for f in available if f.category == cat
-                          and slot_name in f.meal_slots]
+                          and food_slot in f.meal_slots]
             return candidates[:n]
 
         selected: list[FoodItem] = []
@@ -353,9 +366,10 @@ def build_day_plan(
         selected += _pick("grain")
         selected += _pick("veg")
         selected += _pick("fat")
+        selected += _pick("fruit")
         # Fallback: fill from any category if selection is sparse
         if len(selected) < 2:
-            fallback = [f for f in available if f not in selected and slot_name in f.meal_slots]
+            fallback = [f for f in available if f not in selected and food_slot in f.meal_slots]
             selected += fallback[:max(0, 3 - len(selected))]
 
         if not selected:
