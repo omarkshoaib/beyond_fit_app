@@ -3506,6 +3506,24 @@ async def _submit_nutrition(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return ConversationHandler.END
 
 
+def _is_super_admin_user(user_id: int) -> bool:
+    legacy_admin = _admin_chat_id()
+    return auth_roles.is_super_admin(user_id) or (legacy_admin is not None and user_id == legacy_admin)
+
+
+def _coach_authorized_for_client(user_id: int, client_id: str, session: Session) -> bool:
+    """True if user is super-admin or the APPROVED assigned coach of this client."""
+    if _is_super_admin_user(user_id):
+        return True
+    if not client_id:
+        return False
+    client = session.get(ClientProfile, client_id)
+    coach = session.get(CoachProfile, user_id)
+    if client is None or coach is None or coach.status != "approved":
+        return False
+    return client.assigned_coach_id == user_id
+
+
 async def handle_nutrition_approve(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin activates a nutrition plan, generates PDF and emails/notifies client."""
     query = update.callback_query
@@ -3516,6 +3534,10 @@ async def handle_nutrition_approve(update: Update, context: ContextTypes.DEFAULT
         plan = session.get(NutritionPlan, plan_id)
         if not plan:
             await query.edit_message_text("⚠️ Plan not found.")
+            return
+
+        if not _coach_authorized_for_client(update.effective_user.id, plan.client_id, session):
+            await query.edit_message_text("🔒 Not authorized for this client.")
             return
 
         profile = session.get(ClientProfile, plan.client_id)
@@ -3590,6 +3612,9 @@ async def handle_nutrition_discard(update: Update, context: ContextTypes.DEFAULT
     with Session(engine) as session:
         plan = session.get(NutritionPlan, plan_id)
         if plan:
+            if not _coach_authorized_for_client(update.effective_user.id, plan.client_id, session):
+                await query.edit_message_text("🔒 Not authorized for this client.")
+                return
             plan.status = "rejected"
             session.add(plan)
             session.commit()
@@ -4785,9 +4810,17 @@ async def handle_override_remove(update: Update, context: ContextTypes.DEFAULT_T
 # ── SAFETY CLEARANCE ─────────────────────────────────────────────────────────
 
 async def handle_safety_clear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Admin marks a client as cleared by physician, bypassing the safety gate."""
+    """Admin marks a client as cleared by physician, bypassing the safety gate.
+
+    Medical safety override — restricted to the super-admin even for an
+    assigned coach.
+    """
     query = update.callback_query
     await query.answer()
+
+    if not _is_super_admin_user(update.effective_user.id):
+        await query.edit_message_text("🔒 Only the super-admin can clear a medical safety gate.")
+        return
 
     parts = query.data.split(":", 2)
     client_id, condition_key = parts[1], parts[2]
@@ -4859,6 +4892,9 @@ def main():
     if not token:
         logging.error("No TELEGRAM_BOT_TOKEN found.")
         return
+
+    # Production: refuse to boot on the insecure default JWT secret (forge-able tokens).
+    get_settings().require_secure_secret()
 
     super_admin = auth_roles.super_admin_user_id()
     if super_admin is None:

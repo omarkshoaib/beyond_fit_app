@@ -149,6 +149,9 @@ def _ensure_super_admin(engine) -> None:
 async def lifespan(app: FastAPI):
     settings = get_settings()
 
+    # Production: refuse to boot on the insecure default JWT secret (forge-able tokens).
+    settings.require_secure_secret()
+
     if settings.auth_secret_key in ("", "change-me-in-production"):
         logger.warning(
             "⚠️  AUTH_SECRET_KEY is using the default placeholder. "

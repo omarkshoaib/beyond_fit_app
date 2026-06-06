@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     smtp_user: str = ""
     smtp_password: str = ""
 
+    # ── Environment ─────────────────────────────────────────────────
+    # "dev" / "test" tolerate insecure defaults; "production"/"prod" do not.
+    app_env: str = "dev"
+
     # ── Auth ────────────────────────────────────────────────────────
     auth_secret_key: str = "change-me-in-production"
     # Hardcoded super-admin email. Lifespan self-heals this account so the
@@ -72,6 +76,22 @@ class Settings(BaseSettings):
     @property
     def workout_constants(self) -> dict:
         return _load_toml(_CONFIG_DIR / "workout_constants.toml")
+
+    # ── Security self-check ────────────────────────────────────────
+    def require_secure_secret(self) -> None:
+        """Refuse to run on the insecure default / a weak JWT secret in production.
+
+        Call this at app + bot startup so a misconfigured production deploy
+        fails fast instead of signing forge-able tokens.
+        """
+        insecure = {"change-me-in-production", ""}
+        if self.app_env.lower() in {"production", "prod"} and (
+            self.auth_secret_key in insecure or len(self.auth_secret_key) < 32
+        ):
+            raise ValueError(
+                "auth_secret_key is the insecure default or too short (<32 chars); "
+                "set a strong AUTH_SECRET_KEY before running in production."
+            )
 
 
 def _load_toml(path: Path) -> dict:
