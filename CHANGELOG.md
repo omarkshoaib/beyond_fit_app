@@ -1,5 +1,37 @@
 # Changelog
 
+## [1.2.0] — 2026-06-06 — Audit hardening
+
+Full multi-module audit (43-agent read-only sweep) + fixes for the 29 confirmed
+bugs. See `AUDIT_REPORT.md` and `docs/superpowers/plans/2026-06-06-audit-hardening.md`.
+
+### Security
+- Production refuses to boot on the insecure default `auth_secret_key`.
+- Access-token verifier rejects refresh/reset/verify tokens (token-type confusion).
+- `/generate` + `/generate_and_coach` now require authentication.
+- Bot nutrition approve/discard gated to assigned coach or super-admin; medical
+  safety-clear restricted to super-admin.
+- Account deletion scrubs PII from `ProfileSnapshot` snapshots and `Feedback`.
+
+### Nutrition
+- Halal-only catalog (pork removed); inert religious filter dropped; junk `egan`
+  diet tag fixed. Single balanced diet style; low-carb is goal-integrated.
+- Medical filter degrades gracefully (never empties the pool); the service refuses
+  to persist a degenerate ~0-kcal plan.
+
+### Workout engine
+- Powerlifter accessory slots draw from the powerbuilder pool (no more thin days).
+- Per-day volume budget (symmetric repeated day-types); AutoRegulator capped to ±10%.
+- Tier-4 selection fallback eliminates empty/1-slot days.
+
+### Delivery + data
+- Nutrition PDF meal-card + shopping-list render bugs fixed (was never delivering).
+- Mobile coach-review exercise names fixed (were rendering `?`).
+- Check-in: extraction failure no longer discards telemetry / advances the week;
+  the lift catalog now carries canonical exercise_ids; coach-edit LLM output is
+  validated as a `WorkoutWeek` before it can overwrite a plan.
+- 5 clone exercises removed (179 → 174) + contradictory fatigue costs resolved.
+
 ## [1.1.0] — 2026-05-03
 
 ### Added — role/auth model

@@ -93,10 +93,13 @@ A single large in-memory list of exercise dicts (`EXPANDED_EXERCISES_DATA`). Eac
 
 ## Key design constraints
 
-- The workout plan is **always generated deterministically first** — the LLM only formats it into a readable email and optionally mutates it on admin rejection. The LLM never selects exercises.
-- `slot_type = "main_lift"` is referenced in the check-in flow but is **not currently set** by `_fill_slots()` — this is a known gap.
-- The `CoachedWorkoutResponse` model has a field `workout_data` but the route returns `workout=` — there is a field name mismatch between the Pydantic model and the route response.
-- `WorkoutWeek` does not have a `client_id` field, but `test_api.py` asserts `data["workout"]["client_id"] == "999"` — this test will fail against the current model.
+- The workout plan is **always generated deterministically first** — the LLM only formats it into a readable email and optionally mutates it on admin rejection. The LLM never selects exercises. On rejection, `apply_coach_edits()` validates the LLM output as a real `WorkoutWeek` before it can overwrite a live plan.
+- `_fill_slots()` sets `slot_type` per slot index: `main_compound` (slot 0), `secondary_compound` (slot 1), `isolation` (rest). The check-in flow keys off `main_compound`/`secondary_compound`.
+- A powerlifter's accessory/isolation slots draw from the powerbuilder exercise pool (only the competition main lift stays powerlifter-only), so the narrow powerlifter pool no longer collapses days to thin sets.
+- Weekly volume budget is split per-day across the days that train each muscle, so repeated day-types (e.g. 6-day PPL) get symmetric volume.
+- `AutoRegulator.calculate_next_load()` is clamped to ±10% per week.
+- Nutrition is **halal-only** (no non-halal foods stocked; no religious filter) with a **single balanced diet style**; low-carb is goal-integrated (fat-loss leans lower-carb), not a separate style. See the audit report (`AUDIT_REPORT.md`) and `docs/superpowers/plans/2026-06-06-audit-hardening.md`.
+- `CoachedWorkoutResponse.workout` matches the route's `workout=` return; `test_api.py` authenticates and does not assert a `client_id` on the workout. (The previous three bullets here were stale — corrected 2026-06-06.)
 
 ## Environment variables
 
