@@ -177,6 +177,16 @@ class NutritionService:
             rationale=rationale,
             created_at=datetime.now(timezone.utc),
         )
+
+        # Safety guard: never persist a degenerate ~0-kcal plan (e.g. if the food
+        # pool ever collapses to empty). A real plan totals ~target_kcal/day.
+        total_kcal = sum(d.kcal for d in days)
+        if not days or total_kcal < 0.5 * target_kcal * len(days):
+            raise ValueError(
+                f"Refusing to persist a degenerate nutrition plan: {total_kcal:.0f} kcal "
+                f"across {len(days)} days vs target {target_kcal:.0f}/day — food pool likely empty."
+            )
+
         session.add(plan)
         session.commit()
         session.refresh(plan)

@@ -3297,15 +3297,15 @@ async def dn_target_rate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def _dn_ask_diet_style(msg_or_query, context, edit: bool = False) -> int:
+    # Single balanced diet style — macros shift by goal (fat-loss leans lower-carb).
+    # No separate vegan/keto/vegetarian/pescatarian styles by product decision.
     keyboard = [
         [InlineKeyboardButton("⚖️ Balanced", callback_data="dn_diet_balanced")],
-        [InlineKeyboardButton("🥩 Omnivore", callback_data="dn_diet_omnivore"),
-         InlineKeyboardButton("🥗 Vegetarian", callback_data="dn_diet_vegetarian")],
-        [InlineKeyboardButton("🌱 Vegan", callback_data="dn_diet_vegan"),
-         InlineKeyboardButton("🐟 Pescatarian", callback_data="dn_diet_pescatarian")],
-        [InlineKeyboardButton("🥚 Keto", callback_data="dn_diet_keto")],
     ]
-    text = "*Step 10 of 18:* What is your dietary style?"
+    text = (
+        "*Step 10 of 18:* Your plan uses a single *balanced* approach, tuned to your "
+        "goal (a fat-loss goal automatically leans lower-carb). Tap to continue."
+    )
     if edit:
         await msg_or_query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
     else:

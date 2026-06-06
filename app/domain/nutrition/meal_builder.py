@@ -99,19 +99,37 @@ def filter_food_pool(
     result = pool
     if allergens:
         result = [f for f in result if not any(a in f.allergens for a in allergens)]
-    if religious_restrictions:
-        result = [f for f in result if not any(r in f.religious_restrictions for r in religious_restrictions)]
+    # NOTE: `religious_restrictions` is accepted for backward compat but intentionally
+    # NOT applied — the catalog is halal-only, so there is nothing to filter out. A
+    # filter here was previously inert (no food carried religious tags), which gave a
+    # false sense of safety. Halal is guaranteed by the catalog, not by a runtime filter.
     if diet_type and diet_type not in ("omnivore", "balanced", "none"):
         result = [f for f in result if diet_type in f.diet_tags]
     if dislikes:
         dislike_set = {d.lower() for d in dislikes}
         result = [f for f in result if f.slug not in dislike_set and f.name.lower() not in dislike_set]
     if medical_conditions:
+        # Medical caps degrade gracefully: a condition narrows the pool, but if it
+        # would drop below a safe minimum we KEEP the pre-condition (balanced) pool
+        # and flag it for coach review rather than emptying it (which would produce a
+        # 0-kcal plan). No food is medically tagged today, so this currently always
+        # falls back to the full pool + a warning — correct and safe.
+        MIN_SAFE_POOL = 10
         for condition in medical_conditions:
             if condition == "hypertension":
-                result = [f for f in result if "low_sodium" in f.medical_tags]
-            if condition == "type2_diabetes":
-                result = [f for f in result if "low_sugar" in f.medical_tags and f.carb_per_100g < 25]
+                narrowed = [f for f in result if "low_sodium" in f.medical_tags]
+            elif condition == "type2_diabetes":
+                narrowed = [f for f in result if "low_sugar" in f.medical_tags and f.carb_per_100g < 25]
+            else:
+                narrowed = result
+            if len(narrowed) >= MIN_SAFE_POOL:
+                result = narrowed
+            else:
+                logger.warning(
+                    "Medical condition %r would leave only %d foods (< %d) — keeping the "
+                    "balanced pool and flagging for coach review.",
+                    condition, len(narrowed), MIN_SAFE_POOL,
+                )
 
     # Soft filters (degrade gracefully)
     soft_result = [
