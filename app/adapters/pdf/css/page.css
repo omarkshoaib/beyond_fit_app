@@ -2,34 +2,34 @@
 
 @page {
     size: A4 portrait;
-    margin: 20mm 16mm 24mm 16mm;
+    margin: 22mm 18mm 24mm 18mm;
 
     @top-left {
         content: element(running-header-left);
-        font-family: 'Inter', sans-serif;
+        font-family: 'Source Sans 3', sans-serif;
         font-size: 8pt;
-        color: #6B7280;
+        color: #8C8479;
     }
 
     @top-right {
         content: element(running-header-right);
-        font-family: 'Inter', sans-serif;
+        font-family: 'Source Sans 3', sans-serif;
         font-size: 8pt;
-        color: #6B7280;
+        color: #8C8479;
     }
 
     @bottom-center {
         content: counter(page) " / " counter(pages);
-        font-family: 'JetBrains Mono', monospace;
+        font-family: 'Source Sans 3', sans-serif;
         font-size: 8pt;
-        color: #6B7280;
+        color: #8C8479;
     }
 
     @bottom-left {
         content: element(running-footer-left);
-        font-family: 'Inter', sans-serif;
+        font-family: 'Source Sans 3', sans-serif;
         font-size: 7.5pt;
-        color: #9CA3AF;
+        color: #A7A096;
     }
 }
 
@@ -49,20 +49,20 @@
 #running-header-left {
     position: running(running-header-left);
     font-size: 8pt;
-    color: #6B7280;
+    color: #8C8479;
 }
 
 #running-header-right {
     position: running(running-header-right);
     font-size: 8pt;
-    color: #6B7280;
+    color: #8C8479;
     text-align: right;
 }
 
 #running-footer-left {
     position: running(running-footer-left);
     font-size: 7.5pt;
-    color: #9CA3AF;
+    color: #A7A096;
 }
 
 /* Page breaks */
@@ -70,7 +70,7 @@
 .page-break-after  { break-after: page; }
 .no-break          { break-inside: avoid; }
 
-/* Cover page */
+/* ── Cover page — dark, editorial ────────────────────────────────────────── */
 .cover-page {
     page: cover;
     break-after: page;
@@ -78,7 +78,7 @@
     height: 297mm;
     background: var(--ink);
     color: var(--paper);
-    padding: 32mm 20mm;
+    padding: 40mm 24mm 28mm 24mm;
     display: block;
     position: relative;
 }

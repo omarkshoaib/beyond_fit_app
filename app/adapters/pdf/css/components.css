@@ -1,4 +1,4 @@
-/* components.css — shared reusable components */
+/* components.css — shared reusable components (editorial) */
 
 /* ── Macro tiles ─────────────────────────────────────────────────────────── */
 .macro-grid {
@@ -9,17 +9,18 @@
 }
 
 .macro-tile {
-    background: var(--surface);
-    border-radius: 6pt;
-    padding: var(--space-sm) var(--space-sm);
+    background: var(--paper);
+    border: 0.75pt solid var(--border);
+    border-radius: 4pt;
+    padding: 10pt 6pt;
     text-align: center;
     break-inside: avoid;
 }
 
 .macro-tile__value {
-    font-family: var(--font-mono);
-    font-size: 18pt;
-    font-weight: 700;
+    font-family: var(--font-heading);
+    font-size: 21pt;
+    font-weight: 600;
     line-height: 1;
     color: var(--ink);
 }
@@ -27,42 +28,39 @@
 .macro-tile__unit {
     font-size: 8pt;
     color: var(--muted);
-    margin-top: 2pt;
+    margin-top: 3pt;
 }
 
 .macro-tile__label {
-    font-size: 8pt;
+    font-size: 7.5pt;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.1em;
     color: var(--muted);
-    margin-top: 4pt;
+    margin-top: 5pt;
 }
 
+/* Headline kcal tile is the only accented number */
+.macro-tile--kcal { border-color: var(--accent); }
 .macro-tile--kcal .macro-tile__value { color: var(--accent); }
-.macro-tile--protein .macro-tile__value { color: var(--primary); }
 
-/* ── Section header ──────────────────────────────────────────────────────── */
+/* ── Section header — eyebrow + serif title, hairline rule ───────────────── */
 .section-header {
-    border-left: 4pt solid var(--accent);
-    padding-left: var(--space-sm);
+    padding-bottom: 6pt;
+    border-bottom: 1pt solid var(--ink);
     margin-bottom: var(--space-md);
     margin-top: var(--space-lg);
     break-after: avoid;
 }
 
-.section-header--nutrition {
-    border-color: var(--primary);
-}
-
 .section-header h2 { margin: 0; }
-.section-header p  { margin: 2pt 0 0; font-size: 9pt; color: var(--muted); }
+.section-header p  { margin: 3pt 0 0; font-size: 9.5pt; color: var(--muted); }
 
 /* ── Info table ──────────────────────────────────────────────────────────── */
 .info-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 9pt;
+    font-size: 9.5pt;
     margin-bottom: var(--space-md);
 }
 
@@ -71,36 +69,35 @@
     font-weight: 600;
     font-size: 8pt;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.1em;
     color: var(--muted);
-    padding: 4pt 8pt;
-    border-bottom: 1pt solid var(--border);
+    padding: 5pt 8pt;
+    border-bottom: 1pt solid var(--ink);
 }
 
 .info-table td {
-    padding: 5pt 8pt;
-    border-bottom: 1pt solid var(--border);
+    padding: 6pt 8pt;
+    border-bottom: 0.75pt solid var(--border);
     vertical-align: top;
 }
 
 .info-table tr:last-child td { border-bottom: none; }
-.info-table tr:nth-child(even) td { background: var(--surface); }
 
 /* ── Callout box ─────────────────────────────────────────────────────────── */
 .callout {
-    border-left: 3pt solid var(--accent);
-    background: #FFF5F0;
+    border-left: 2.5pt solid var(--accent);
+    background: var(--surface);
     padding: var(--space-sm) var(--space-md);
-    border-radius: 0 4pt 4pt 0;
+    border-radius: 0 3pt 3pt 0;
     margin-bottom: var(--space-md);
     break-inside: avoid;
 }
 
-.callout--info   { border-color: #3B82F6; background: #EFF6FF; }
-.callout--warn   { border-color: #F59E0B; background: #FFFBEB; }
-.callout--deload { border-color: var(--accent-alt); background: #F0FDF4; }
+.callout--info   { border-color: var(--accent-alt); }
+.callout--warn   { border-color: var(--gold); }
+.callout--deload { border-color: var(--accent-alt); }
 
-.callout p { margin: 0; font-size: 9pt; }
+.callout p { margin: 0; font-size: 9.5pt; }
 
 /* ── Draft watermark ─────────────────────────────────────────────────────── */
 .watermark {
@@ -109,15 +106,15 @@
     left: 50%;
     transform: translate(-50%, -50%) rotate(-45deg);
     font-family: var(--font-heading);
-    font-size: 80pt;
-    font-weight: 900;
-    color: rgba(255, 90, 31, 0.08);
+    font-size: 86pt;
+    font-weight: 600;
+    color: rgba(181, 83, 47, 0.07);
     white-space: nowrap;
     pointer-events: none;
     z-index: -1;
 }
 
-/* ── Two-column layout ───────────────────────────────────────────────────── */
+/* ── Multi-column layout ─────────────────────────────────────────────────── */
 .two-col {
     display: grid;
     grid-template-columns: 1fr 1fr;

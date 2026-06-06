@@ -1,39 +1,41 @@
-/* nutrition.css — nutrition plan specific layout */
+/* nutrition.css — nutrition plan layout (editorial, unified palette) */
 
 body.nutrition-mode {
-    background: var(--paper-n);
+    background: var(--paper);
 }
 
 /* ── Meal card ───────────────────────────────────────────────────────────── */
 .meal-card {
-    border: 1pt solid var(--border);
-    border-left: 3pt solid var(--primary);
-    border-radius: 0 6pt 6pt 0;
+    border: 0.75pt solid var(--border);
+    border-left: 2.5pt solid var(--accent);
+    border-radius: 0 4pt 4pt 0;
     margin-bottom: var(--space-sm);
-    background: #fff;
+    background: var(--paper);
     break-inside: avoid;
 }
 
 .meal-card__header {
-    background: var(--primary);
-    color: #fff;
-    padding: 5pt var(--space-sm);
+    background: transparent;
+    color: var(--ink);
+    padding: 7pt var(--space-sm) 5pt;
+    border-bottom: 0.75pt solid var(--border);
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: baseline;
 }
 
 .meal-card__title {
     font-family: var(--font-heading);
-    font-size: 10pt;
-    font-weight: 700;
+    font-size: 12pt;
+    font-weight: 600;
     text-transform: capitalize;
 }
 
 .meal-card__kcal {
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-size: 9pt;
-    opacity: 0.85;
+    font-weight: 600;
+    color: var(--accent);
 }
 
 .meal-card__body {
@@ -41,24 +43,28 @@ body.nutrition-mode {
 }
 
 .meal-card__macro-row {
-    display: flex;
-    gap: var(--space-sm);
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-size: 8.5pt;
     color: var(--muted);
     margin-bottom: var(--space-sm);
+    letter-spacing: 0.02em;
 }
 
-.meal-card__macro-row span { white-space: nowrap; }
+/* WeasyPrint ignores flex `gap`, so space the macro chips explicitly. */
+.meal-card__macro-row span {
+    white-space: nowrap;
+    display: inline-block;
+    margin-right: var(--space-md);
+}
 
 /* Food item rows */
 .food-item-row {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
-    padding: 3pt 0;
+    padding: 3.5pt 0;
     border-bottom: 0.5pt solid var(--border);
-    font-size: 9pt;
+    font-size: 9.5pt;
 }
 
 .food-item-row:last-child { border-bottom: none; }
@@ -66,31 +72,32 @@ body.nutrition-mode {
 .food-item-row__name { flex: 1; }
 
 .food-item-row__amount {
-    font-family: var(--font-mono);
-    font-size: 8.5pt;
+    font-family: var(--font-body);
+    font-size: 9pt;
     color: var(--muted);
-    min-width: 36pt;
+    min-width: 38pt;
     text-align: right;
 }
 
-/* ── Day nutrition summary ───────────────────────────────────────────────── */
+/* ── Day nutrition summary header ────────────────────────────────────────── */
 .nutrition-day-header {
-    background: var(--primary);
-    color: #fff;
+    background: var(--ink);
+    color: var(--paper);
     padding: var(--space-sm) var(--space-md);
     margin-bottom: var(--space-md);
-    border-radius: 4pt;
+    border-radius: 3pt;
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: baseline;
     break-after: avoid;
 }
 
-.nutrition-day-header h3 { color: #fff; margin: 0; font-size: 13pt; }
+.nutrition-day-header h3 { color: var(--paper); margin: 0; font-size: 14pt; }
 .nutrition-day-header .day-meta {
-    font-size: 8pt;
-    color: rgba(255,255,255,0.7);
-    font-family: var(--font-mono);
+    font-size: 8.5pt;
+    color: rgba(252, 250, 246, 0.72);
+    font-family: var(--font-body);
+    letter-spacing: 0.02em;
 }
 
 /* ── Shopping list ───────────────────────────────────────────────────────── */
@@ -100,51 +107,51 @@ body.nutrition-mode {
 }
 
 .shopping-category__title {
-    font-family: var(--font-heading);
-    font-size: 10pt;
-    font-weight: 700;
+    font-family: var(--font-body);
+    font-size: 8.5pt;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--primary);
-    border-bottom: 1pt solid var(--border);
-    padding-bottom: 3pt;
+    letter-spacing: 0.12em;
+    color: var(--accent);
+    border-bottom: 0.75pt solid var(--border);
+    padding-bottom: 4pt;
     margin-bottom: var(--space-sm);
 }
 
 .shopping-item {
-    font-size: 9pt;
-    padding: 2pt 0;
+    font-size: 9.5pt;
+    padding: 2.5pt 0;
     display: flex;
     align-items: baseline;
-    gap: 6pt;
+    gap: 7pt;
 }
 
 .shopping-item::before {
-    content: "☐";
-    font-size: 10pt;
-    color: var(--muted);
+    content: "\25CB";
+    font-size: 9pt;
+    color: var(--accent);
     flex-shrink: 0;
 }
 
 .shopping-item__name { flex: 1; }
 .shopping-item__qty {
-    font-family: var(--font-mono);
-    font-size: 8.5pt;
+    font-family: var(--font-body);
+    font-size: 9pt;
     color: var(--muted);
 }
 
-/* ── Macro overview chart placeholder ───────────────────────────────────── */
+/* ── Macro chart ─────────────────────────────────────────────────────────── */
 .macro-chart {
     text-align: center;
     margin: var(--space-md) 0;
 }
 
-.macro-chart img {
+.macro-chart img,
+.macro-chart svg {
     max-width: 100%;
     height: auto;
 }
 
-/* ── Nutrition section headers use --primary accent ─────────────────────── */
 .section-header--nutrition .section-header__bar {
-    border-left-color: var(--primary);
+    border-left-color: var(--accent);
 }
