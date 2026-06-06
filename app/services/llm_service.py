@@ -125,4 +125,12 @@ class FlashCommunicationService:
         except json.JSONDecodeError as e:
             raise ValueError(f"LLM returned invalid JSON: {e}\nContent: {content[:200]}")
 
+        # Validate the edited payload is a structurally-valid WorkoutWeek before it
+        # can overwrite a live plan — a malformed LLM response must not corrupt it.
+        from app.models import WorkoutWeek
+        try:
+            WorkoutWeek.model_validate_json(content)
+        except Exception as e:
+            raise ValueError(f"LLM edit is not a valid WorkoutWeek: {e}\nContent: {content[:200]}")
+
         return content

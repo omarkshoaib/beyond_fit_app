@@ -2379,6 +2379,20 @@ def _make_llm_client() -> OpenRouterClient:
     )
 
 
+def _build_lift_catalog(week: WorkoutWeek) -> list[str]:
+    """Lift catalog handed to the extractor. Each entry MUST lead with the
+    canonical exercise_id (the schema's `exercise_canonical`, which telemetry is
+    matched on), with the display name in parens so the model can map raw
+    mentions like "bench" to the id. Passing bare names made the LLM echo names
+    that never matched slot.exercise_id, silently dropping all telemetry."""
+    return [
+        f"{slot.exercise_id} ({slot.exercise_name})"
+        for day in week.days
+        for slot in day.slots
+        if slot.slot_type in ("main_compound", "secondary_compound")
+    ]
+
+
 @auth_roles.requires_assigned_coach
 async def start_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     client_id = _current_client_id(update)
@@ -2428,12 +2442,7 @@ async def start_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     context.user_data["checkin_history_id"] = history.history_id
     context.user_data["checkin_week_number"] = week.week_number
     context.user_data["checkin_messages"] = []
-    context.user_data["checkin_lift_catalog"] = [
-        slot.exercise_name
-        for day in week.days
-        for slot in day.slots
-        if slot.slot_type in ("main_compound", "secondary_compound")
-    ]
+    context.user_data["checkin_lift_catalog"] = _build_lift_catalog(week)
     context.user_data["checkin_prior_profile"] = (
         client.model_dump_json(indent=2) if client else ""
     )
@@ -2755,6 +2764,18 @@ async def _process_checkin(
             "Reply with your answers and I'll finish up.",
         )
         return CHECKIN_CLARIFYING
+
+    # Extraction failed entirely — do NOT advance the week or discard telemetry.
+    # The raw messages are already persisted (CheckIn row); tell the client to retry.
+    if extraction is None:
+        logging.getLogger(__name__).warning(
+            "checkin_extraction_failed client_id=%s raw=%r", client_id, raw_text[:500]
+        )
+        await update.message.reply_text(
+            "⚠️ I couldn't read your check-in just now. Your progress is saved — "
+            "please type /checkin and try again in a moment."
+        )
+        return ConversationHandler.END
 
     # Write telemetry back onto the workout JSON
     with Session(engine, expire_on_commit=False) as session:

@@ -283,6 +283,41 @@ async def test_checkin_increments_week_and_generates_plan(test_engine, mock_bot)
     assert new_pending is not None
 
 
+async def test_checkin_extraction_failure_does_not_advance_week(test_engine, mock_bot):
+    """If extraction raises, the week must NOT advance and telemetry must survive."""
+    profile, history = _seed_profile_and_history(test_engine)
+    with Session(test_engine) as s:
+        fresh = s.get(ClientProfile, str(USER_ID))
+        starting_week = fresh.week_number
+        prior_profile_json = fresh.model_dump_json()
+        history_id = history.history_id
+
+    update = make_text_update(mock_bot, USER_ID, "felt ok")
+    ctx = make_context(mock_bot, user_data={
+        "checkin_messages": ["squats 100kg rpe 8, bench 80kg rpe 7"],
+        "checkin_history_id": history_id,
+        "checkin_lift_catalog": ["Barbell Bench Press"],
+        "checkin_prior_profile": prior_profile_json,
+        "checkin_week_number": starting_week,
+    })
+
+    def _boom(*a, **k):
+        raise RuntimeError("LLM down")
+
+    with patch("app.bot.extract_checkin", side_effect=_boom), \
+         patch("app.bot._make_llm_client", return_value=AsyncMock()):
+        await _process_checkin(update, ctx)
+
+    with Session(test_engine) as session:
+        unchanged = session.get(ClientProfile, str(USER_ID))
+        new_pending = session.exec(
+            select(PendingApproval).where(PendingApproval.client_id == str(USER_ID))
+        ).first()
+
+    assert unchanged.week_number == starting_week, "week must not advance on extraction failure"
+    assert new_pending is None, "no new plan should be generated on extraction failure"
+
+
 # ── Test 6: Rate limiter blocks a second immediate generation ──────────────────
 
 async def test_rate_limit_blocks_second_call(test_engine, mock_bot):
