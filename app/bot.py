@@ -524,6 +524,7 @@ async def run_generation_and_dispatch(
             keyboard = [[
                 InlineKeyboardButton("✅ Approve", callback_data=f"approve:{approval_id}"),
                 InlineKeyboardButton("❌ Reject", callback_data=f"reject:{approval_id}"),
+                InlineKeyboardButton("➕ Add core", callback_data=f"addcore:{approval_id}"),
             ]]
 
             summary = _build_client_summary(client_user_id)
@@ -4079,6 +4080,7 @@ async def handle_admin_feedback(update: Update, context: ContextTypes.DEFAULT_TY
             keyboard = [[
                 InlineKeyboardButton("✅ Approve", callback_data=f"approve:{approval_id}"),
                 InlineKeyboardButton("❌ Reject again", callback_data=f"reject:{approval_id}"),
+                InlineKeyboardButton("➕ Add core", callback_data=f"addcore:{approval_id}"),
             ]]
             edit_log = pending.edit_log or []
             edits_section = ""
@@ -4320,6 +4322,171 @@ async def admin_review(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
+# ── Coach "add core at verification" ───────────────────────────────────────────
+
+def _core_choices_for_client(client: ClientProfile) -> list[dict]:
+    """Core exercises whose equipment the client has, deterministically sorted.
+    Falls back to bodyweight core if the client's equipment yields none."""
+    from app.exercise_db import get_exercise_db
+    avail = set(client.available_equipment or [])
+    full = "full_gym" in avail
+    core = [e for e in get_exercise_db() if e.get("primary_muscle") == "core"]
+
+    def _has_equipment(e: dict) -> bool:
+        return full or all(eq in avail for eq in e["equipment_required"])
+
+    choices = [e for e in core if _has_equipment(e)]
+    if not choices:
+        choices = [e for e in core if "bodyweight" in e["equipment_required"]]
+    return sorted(choices, key=lambda e: e["exercise_id"])
+
+
+def _add_core_to_day(week: WorkoutWeek, day_index: int, exercise: dict) -> WorkoutWeek:
+    """Append a deterministic core slot to a day (in place) and return the week."""
+    day = week.days[day_index]
+    rpe = day.slots[0].rpe if day.slots else 7
+    order = max((s.slot_order for s in day.slots), default=0) + 1
+    day.slots.append(WorkoutSlot(
+        slot_order=order,
+        slot_type="isolation",
+        exercise_id=exercise["exercise_id"],
+        exercise_name=exercise["name"],
+        sets=3,
+        reps="10-15",
+        rpe=rpe,
+        rest_seconds=60,
+        coaching_cues=[],
+        warmup_sets=[],
+        biomechanical_focus=exercise.get("biomechanical_focus"),
+    ))
+    day.total_fatigue = day.total_fatigue + exercise.get("fatigue_cost", 1)
+    return week
+
+
+def _review_keyboard(approval_id: str) -> InlineKeyboardMarkup:
+    """Approve / Reject / Add-core keyboard shown on a plan under review."""
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Approve", callback_data=f"approve:{approval_id}"),
+        InlineKeyboardButton("❌ Reject", callback_data=f"reject:{approval_id}"),
+        InlineKeyboardButton("➕ Add core", callback_data=f"addcore:{approval_id}"),
+    ]])
+
+
+def _render_pending_plan_text(pending: "PendingApproval") -> str:
+    """Markdown body for a pending plan under review."""
+    workout = WorkoutWeek.model_validate_json(pending.workout_json)
+    client_summary = _build_client_summary(pending.client_id)
+    submitted = pending.created_at.strftime('%Y-%m-%d %H:%M') if pending.created_at else 'unknown'
+    day_lines = []
+    for day in workout.days:
+        day_lines.append(f"  *{day.day_name}*")
+        for slot in sorted(day.slots, key=lambda s: s.slot_order):
+            wt = f" → {slot.target_weight}kg" if slot.target_weight else ""
+            day_lines.append(
+                f"    {slot.slot_order}. {slot.exercise_name} {slot.sets}×{slot.reps} RPE{slot.rpe}{wt}"
+            )
+    plan_body = "\n".join(day_lines)
+    return (
+        f"🏋️ *Workout Plan — Week {workout.week_number}*  ·  Submitted {submitted}\n\n"
+        f"{client_summary}\n\n"
+        f"────────────────────\n"
+        f"*Programme:*\n{plan_body}"
+    )
+
+
+async def _safe_edit_markdown(query, text, reply_markup=None) -> None:
+    """Edit a callback message as Markdown, falling back to plain text."""
+    try:
+        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=reply_markup)
+    except Exception:
+        await query.edit_message_text(text, reply_markup=reply_markup)
+
+
+async def handle_add_core_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Step 1: coach tapped 'Add core' — show a day picker."""
+    query = update.callback_query
+    await query.answer()
+    approval_id = query.data.split(":", 1)[1]
+    with Session(engine) as session:
+        pending = session.get(PendingApproval, approval_id)
+        if not pending:
+            await query.edit_message_text("❌ Plan no longer pending.")
+            return
+        if not _user_can_act_on_client(update.effective_user.id, pending.client_id):
+            await query.edit_message_text("🔒 Not authorized for this client.")
+            return
+        week = WorkoutWeek.model_validate_json(pending.workout_json)
+    rows = [
+        [InlineKeyboardButton(f"{i + 1}. {d.day_name}", callback_data=f"addcore_d:{approval_id}:{i}")]
+        for i, d in enumerate(week.days)
+    ]
+    rows.append([InlineKeyboardButton("↩️ Back", callback_data=f"addcore_back:{approval_id}")])
+    await query.edit_message_reply_markup(InlineKeyboardMarkup(rows))
+
+
+async def handle_add_core_day(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Step 2: coach picked a day — show core-exercise picker for the client's kit."""
+    query = update.callback_query
+    await query.answer()
+    _, approval_id, di = query.data.split(":")
+    with Session(engine) as session:
+        pending = session.get(PendingApproval, approval_id)
+        if not pending:
+            await query.edit_message_text("❌ Plan no longer pending.")
+            return
+        if not _user_can_act_on_client(update.effective_user.id, pending.client_id):
+            await query.edit_message_text("🔒 Not authorized for this client.")
+            return
+        client = session.get(ClientProfile, pending.client_id)
+    choices = _core_choices_for_client(client) if client else []
+    rows = [
+        [InlineKeyboardButton(e["name"], callback_data=f"addcore_x:{approval_id}:{di}:{xi}")]
+        for xi, e in enumerate(choices)
+    ]
+    rows.append([InlineKeyboardButton("↩️ Back", callback_data=f"addcore:{approval_id}")])
+    await query.edit_message_reply_markup(InlineKeyboardMarkup(rows))
+
+
+async def handle_add_core_exercise(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Step 3: coach picked an exercise — insert it and re-render the plan."""
+    query = update.callback_query
+    await query.answer()
+    _, approval_id, di, xi = query.data.split(":")
+    di, xi = int(di), int(xi)
+    added_name = None
+    with Session(engine) as session:
+        pending = session.get(PendingApproval, approval_id)
+        if not pending:
+            await query.edit_message_text("❌ Plan no longer pending.")
+            return
+        if not _user_can_act_on_client(update.effective_user.id, pending.client_id):
+            await query.edit_message_text("🔒 Not authorized for this client.")
+            return
+        client = session.get(ClientProfile, pending.client_id)
+        choices = _core_choices_for_client(client) if client else []
+        week = WorkoutWeek.model_validate_json(pending.workout_json)
+        if xi >= len(choices) or di >= len(week.days):
+            await query.answer("That option is no longer valid.", show_alert=True)
+            return
+        exercise = choices[xi]
+        added_name = exercise["name"]
+        _add_core_to_day(week, di, exercise)
+        pending.workout_json = week.model_dump_json()
+        session.add(pending)
+        session.commit()
+        session.refresh(pending)
+        text = f"✅ Added *{added_name}* to *{week.days[di].day_name}*.\n\n" + _render_pending_plan_text(pending)
+    await _safe_edit_markdown(query, text, reply_markup=_review_keyboard(approval_id))
+
+
+async def handle_add_core_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Cancel the add-core flow — restore the plan review keyboard."""
+    query = update.callback_query
+    await query.answer()
+    approval_id = query.data.split(":", 1)[1]
+    await query.edit_message_reply_markup(_review_keyboard(approval_id))
+
+
 async def handle_open_pending_item(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Expand a single pending workout plan for the admin to review."""
     query = update.callback_query
@@ -4360,11 +4527,8 @@ async def handle_open_pending_item(update: Update, context: ContextTypes.DEFAULT
         f"────────────────────\n"
         f"*Programme:*\n{plan_body}"
     )
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Approve", callback_data=f"approve:{approval_id}"),
-        InlineKeyboardButton("❌ Reject", callback_data=f"reject:{approval_id}"),
-    ]])
-    await safe_send_markdown(context.bot, query.message.chat_id, msg, reply_markup=keyboard)
+    await safe_send_markdown(context.bot, query.message.chat_id, msg,
+                             reply_markup=_review_keyboard(approval_id))
 
 
 async def admin_review_batch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -5193,6 +5357,11 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_open_pending_item, pattern=r"^open_pending:"))
     app.add_handler(CallbackQueryHandler(handle_admin_approve, pattern=r"^approve:"))
     app.add_handler(CallbackQueryHandler(handle_admin_approve_confirmed, pattern=r"^approve_confirmed:"))
+    # Coach "add core at verification": pick day -> pick exercise -> re-render review.
+    app.add_handler(CallbackQueryHandler(handle_add_core_day, pattern=r"^addcore_d:"))
+    app.add_handler(CallbackQueryHandler(handle_add_core_exercise, pattern=r"^addcore_x:"))
+    app.add_handler(CallbackQueryHandler(handle_add_core_back, pattern=r"^addcore_back:"))
+    app.add_handler(CallbackQueryHandler(handle_add_core_start, pattern=r"^addcore:"))
     app.add_handler(CallbackQueryHandler(handle_fc_confirm, pattern=r"^fc_confirm_"))
     app.add_handler(CallbackQueryHandler(handle_nutrition_approve, pattern=r"^nutrapprove:"))
     app.add_handler(CallbackQueryHandler(handle_nutrition_discard, pattern=r"^nutrdiscard:"))
