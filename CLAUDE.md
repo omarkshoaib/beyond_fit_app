@@ -100,6 +100,24 @@ A single large in-memory list of exercise dicts (`EXPANDED_EXERCISES_DATA`). Eac
 - `AutoRegulator.calculate_next_load()` is clamped to ±10% per week.
 - Nutrition is **halal-only** (no non-halal foods stocked; no religious filter) with a **single balanced diet style**; low-carb is goal-integrated (fat-loss leans lower-carb), not a separate style. See the audit report (`AUDIT_REPORT.md`) and `docs/superpowers/plans/2026-06-06-audit-hardening.md`.
 - `CoachedWorkoutResponse.workout` matches the route's `workout=` return; `test_api.py` authenticates and does not assert a `client_id` on the workout. (The previous three bullets here were stale — corrected 2026-06-06.)
+- Declared limitations are honored in exercise selection: `SUBSTITUTION_MAP`
+  (`app/domain/workout/constants.py`) bans unsafe movement patterns
+  (`knee_pain`→squat/lunge, `shoulder_impingement`→overhead/upright-row,
+  `lower_back_pain`→hinge **and back-loaded squat**) in `_filter_exercises`, with a
+  last-resort Tier-5 substitution in `_select_for_slot` so a day is never emptied.
+  `wrist_pain`/`hip_flexor_tightness` add a coaching caveat (`INJURY_CAVEATS`), not an
+  exclusion. NOTE: `lower_back_pain` now also restricts squat (was hinge-only) — a
+  behavior expansion, clinically intended.
+- Week-1 working loads are seeded from optional intake baselines (squat/bench/deadlift
+  → Brzycki e1RM → Tuchscherer RPE/%1RM, rounded down) via
+  `app/domain/workout/loadseed.py`; the prior-week autoregulator takes precedence from
+  week 2, and skipped baselines fall back to rep+RPE guidance.
+- Meal plans rotate per day (`build_day_plan(day_index=...)`) so a 7-day plan draws
+  varied foods, not the same foods every day (the >5×/week cap still applies on top).
+- Each generated nutrition day is gated by `validate_day`; residual drift is
+  non-blocking and surfaced in the plan `rationale` ("[macro drift]") for the coach.
+  The fat check is grounded in the AMDR (fat ≤ 35% of energy), not a tight band around
+  the design target.
 
 ## Environment variables
 

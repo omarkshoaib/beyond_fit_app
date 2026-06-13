@@ -1,5 +1,44 @@
 # Changelog
 
+## [1.3.0] — 2026-06-13 — Usability + safety cluster
+
+Four independent deterministic slices wired into the coaching engine.
+See `docs/superpowers/plans/2026-06-13-usability-safety-cluster.md`.
+
+### Safety
+- Declared injuries now gate exercise selection, not just collected.
+  `knee_pain` bans squat/lunge; `shoulder_impingement` bans overhead/upright-row
+  movements; `lower_back_pain` bans hinge and back-loaded squat (expanded from
+  hinge-only — clinically intended). A Tier-5 last-resort substitution in
+  `_select_for_slot` ensures no training day is ever left empty.
+  `wrist_pain`/`hip_flexor_tightness` add a coaching cue on affected slots
+  without restricting the exercise pool.
+
+### Usability
+- Week-1 plans now seed starting loads from optional squat/bench/deadlift
+  baselines entered at intake (Brzycki e1RM → Tuchscherer RPE/%1RM table,
+  rounded down to 2.5 kg). Three skippable intake questions added to the bot.
+  The prior-week autoregulator takes over from week 2; skipped baselines fall
+  back to rep+RPE guidance strings.
+- Meal plans now vary day-to-day: `build_day_plan` accepts `day_index` and
+  rotates food selection so a 7-day plan draws different foods each day.
+  The >5×/week cap still applies on top.
+
+### Accuracy
+- Each generated nutrition day is validated (kcal ±10%, protein ±5%, fat ≤ AMDR
+  35%, fiber floor). Residual drift is non-blocking — the plan still persists —
+  but is surfaced to the coach in the plan `rationale` as "[macro drift]".
+
+### Schema
+- Migration `0020_client_baseline_e1rm`: 3 nullable `DOUBLE PRECISION` columns
+  added to `clientprofile` (`squat_e1rm`, `bench_e1rm`, `deadlift_e1rm`).
+
+### Tests
+- 324 passing (was 288). New test files: `test_loadseed.py`,
+  `test_injury_substitution.py`, `test_meal_rotation.py`,
+  `test_nutrition_validation_gate.py`. New tests in `test_bot_flow.py` and
+  `test_generator_hardening.py`.
+
 ## [1.2.0] — 2026-06-06 — Audit hardening
 
 Full multi-module audit (43-agent read-only sweep) + fixes for the 29 confirmed

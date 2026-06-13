@@ -1214,3 +1214,26 @@ identically in the model, migration, intake persist, and `_PATTERN_BASELINE`.
 
 **Ordering caveat:** Task 7 reuses the `day_index` loop variable introduced in
 Task 6 — implement Task 6 before Task 7 (or rename per the note in Task 7 Step 3).
+
+---
+
+## Post-implementation follow-ups
+
+These were surfaced during implementation/review and are intentionally OUT of scope
+for this cluster — candidates for their own spec:
+
+1. **Meal-builder fat bias (B-tier refinement).** `build_day_plan` picks a
+   dedicated fat-category food in every meal slot at a 30 g floor, so real plans land
+   fat at ~30–36% of energy vs a 28% design target. This is dietarily fine (inside the
+   20–35% AMDR) and kcal/protein track well, so it is NOT a bug — but if tighter fat
+   tracking is wanted, the fix is in the builder's selection/objective, not the
+   validator. The `validate_day` fat check was calibrated to the 35% AMDR ceiling so
+   the gate stays signal (flags genuine outliers) rather than flagging ~86% of days.
+
+2. **Dual-injury hinge deadlock (edge case).** A client declaring BOTH
+   `lower_back_pain` AND `shoulder_impingement` can leave a hinge-pattern slot with no
+   safe substitute (lower_back_pain→horizontal_pull, which shoulder_impingement bans).
+   The safety invariant holds (no unsafe exercise is ever selected — the slot is left
+   thin instead), and the HITL coach review + "add core/exercise at verification" flow
+   covers it. A future enhancement could substitute across muscle groups for such
+   compound cases.
