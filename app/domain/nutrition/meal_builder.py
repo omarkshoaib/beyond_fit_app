@@ -265,7 +265,12 @@ def validate_day(
     Return a list of validation failure strings (empty = passing).
 
     strict=True  → kcal ±5%
-    strict=False → kcal ±8% (fallback)
+    strict=False → kcal ±8% (fallback). NOTE: ``strict`` only relaxes the kcal
+    tolerance; protein/fat/fiber checks are unaffected by it.
+
+    ``target_fat_g`` is retained for call-site signature stability but is no
+    longer read — the fat check is an AMDR %-of-energy ceiling, not a band
+    around the design target.
     """
     errors: list[str] = []
     kcal_tol = 0.05 if strict else 0.08
@@ -281,6 +286,8 @@ def validate_day(
     # Fat upper bound is grounded in the AMDR (fat ≤ 35% of total energy), not a tight
     # ±band around the design target. A real-food builder lands ~30-35% fat on a 28%-target
     # day, which is dietarily fine; flag only days that genuinely exceed the AMDR ceiling.
+    # day.kcal>0 guard avoids div-by-zero; a degenerate 0-kcal day is caught by the
+    # 0.8 g/kg fat floor below and the whole-week degenerate guard in NutritionService.
     fat_pct_energy = (day.fat_g * 9.0 / day.kcal) if day.kcal > 0 else 0.0
     if fat_pct_energy > 0.35:
         errors.append(
