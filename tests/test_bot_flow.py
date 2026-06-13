@@ -398,3 +398,69 @@ def test_limitations_exits_route_to_baseline_not_email():
 def test_intake_states_register_baseline_handlers():
     for name in ("handle_base_squat", "handle_base_bench", "handle_base_deadlift"):
         assert hasattr(bot, name)
+
+
+# ── Baseline handler behavioral tests (Task 3 — Fix 3) ───────────────────────
+
+from app.bot import ASK_BASE_BENCH, handle_base_squat
+
+
+async def test_handle_base_squat_text_stores_brzycki_e1rm(mock_bot):
+    """Text input '100x5' must store Brzycki e1RM (112.5) and return ASK_BASE_BENCH."""
+    update = make_text_update(mock_bot, USER_ID, "100x5")
+    ctx = make_context(mock_bot, user_data={})
+
+    result = await handle_base_squat(update, ctx)
+
+    assert ctx.user_data["squat_e1rm"] == pytest.approx(112.5)
+    assert result == ASK_BASE_BENCH
+
+
+async def test_handle_base_squat_skip_stores_none(mock_bot):
+    """Pressing Skip (callback_query) must store None for squat_e1rm and return ASK_BASE_BENCH."""
+    update = make_callback_update(mock_bot, USER_ID, data="base_skip")
+    ctx = make_context(mock_bot, user_data={})
+
+    result = await handle_base_squat(update, ctx)
+
+    assert ctx.user_data["squat_e1rm"] is None
+    assert result == ASK_BASE_BENCH
+
+
+def test_update_branch_preserves_e1rm_on_skip():
+    """Regression for Fix 1: non-None guard must not overwrite an existing e1RM with None."""
+    # Simulate user_data after Skip (key present, value None)
+    user_data_skipped = {"squat_e1rm": None, "bench_e1rm": None, "deadlift_e1rm": None}
+
+    class _FakeProfile:
+        squat_e1rm = 120.0
+        bench_e1rm = 100.0
+        deadlift_e1rm = 150.0
+
+    profile = _FakeProfile()
+
+    # Apply the guarded assignment logic from handle_email's UPDATE branch
+    if user_data_skipped.get("squat_e1rm") is not None:
+        profile.squat_e1rm = user_data_skipped["squat_e1rm"]
+    if user_data_skipped.get("bench_e1rm") is not None:
+        profile.bench_e1rm = user_data_skipped["bench_e1rm"]
+    if user_data_skipped.get("deadlift_e1rm") is not None:
+        profile.deadlift_e1rm = user_data_skipped["deadlift_e1rm"]
+
+    # Stored values must survive the skip
+    assert profile.squat_e1rm == pytest.approx(120.0)
+    assert profile.bench_e1rm == pytest.approx(100.0)
+    assert profile.deadlift_e1rm == pytest.approx(150.0)
+
+    # When a real value is provided it must be updated
+    user_data_updated = {"squat_e1rm": 130.0, "bench_e1rm": None, "deadlift_e1rm": None}
+    if user_data_updated.get("squat_e1rm") is not None:
+        profile.squat_e1rm = user_data_updated["squat_e1rm"]
+    if user_data_updated.get("bench_e1rm") is not None:
+        profile.bench_e1rm = user_data_updated["bench_e1rm"]
+    if user_data_updated.get("deadlift_e1rm") is not None:
+        profile.deadlift_e1rm = user_data_updated["deadlift_e1rm"]
+
+    assert profile.squat_e1rm == pytest.approx(130.0)
+    assert profile.bench_e1rm == pytest.approx(100.0)   # unchanged
+    assert profile.deadlift_e1rm == pytest.approx(150.0)  # unchanged

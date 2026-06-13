@@ -2028,7 +2028,7 @@ def _baseline_keyboard() -> InlineKeyboardMarkup:
 
 async def _prompt_baseline(target, lift: str) -> None:
     await target(
-        f"Optional — your best recent {lift} set? Reply like `100x5` (weight×reps, "
+        f"Optional — your best recent {lift} set? Reply like 100x5 (weight×reps, "
         f"reps ≤ 10), or tap Skip.",
         reply_markup=_baseline_keyboard(),
     )
@@ -2053,7 +2053,7 @@ async def _store_baseline_and_next(update, context, field: str, next_state, next
         parsed = _parse_baseline_set(update.message.text)
         if parsed is None:
             await update.message.reply_text(
-                "Couldn't read that. Use `weight x reps`, e.g. `100x5` (reps ≤ 10), or tap Skip.",
+                "Couldn't read that. Use weight×reps, e.g. 100x5 (reps ≤ 10), or tap Skip.",
                 reply_markup=_baseline_keyboard(),
             )
             return _CURRENT_BASELINE_STATE[field]   # re-ask same state
@@ -2114,9 +2114,12 @@ async def handle_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 profile.email = email
                 profile.name = first_name
                 profile.limitations_notes = context.user_data.get('limitations_notes', profile.limitations_notes)
-                profile.squat_e1rm = context.user_data.get('squat_e1rm', profile.squat_e1rm)
-                profile.bench_e1rm = context.user_data.get('bench_e1rm', profile.bench_e1rm)
-                profile.deadlift_e1rm = context.user_data.get('deadlift_e1rm', profile.deadlift_e1rm)
+                if context.user_data.get('squat_e1rm') is not None:
+                    profile.squat_e1rm = context.user_data['squat_e1rm']
+                if context.user_data.get('bench_e1rm') is not None:
+                    profile.bench_e1rm = context.user_data['bench_e1rm']
+                if context.user_data.get('deadlift_e1rm') is not None:
+                    profile.deadlift_e1rm = context.user_data['deadlift_e1rm']
                 profile.available_equipment = profile.available_equipment or ["full_gym"]
                 session.add(profile)
                 session.commit()
