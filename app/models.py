@@ -70,6 +70,10 @@ class ClientProfile(SQLModel, table=True):
     postpartum_weeks: Optional[int] = Field(default=None)
     unexplained_weight_loss: Optional[bool] = Field(default=None)
     progressive_neuro_deficits: Optional[bool] = Field(default=None)
+    # ── Week-1 load seeding (baseline estimated 1RMs from intake) ──
+    squat_e1rm: Optional[float] = Field(default=None)
+    bench_e1rm: Optional[float] = Field(default=None)
+    deadlift_e1rm: Optional[float] = Field(default=None)
 
 
 class ProfileSnapshot(SQLModel, table=True):
