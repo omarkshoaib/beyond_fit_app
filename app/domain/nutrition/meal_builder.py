@@ -315,6 +315,11 @@ _SLOT_TO_FOOD_SLOT: dict[str, str] = {
     "evening_snack": "snack",
 }
 
+# Rotation offsets so categories don't all advance in lockstep across days.
+_CATEGORY_OFFSET: dict[str, int] = {
+    "protein": 0, "grain": 1, "veg": 2, "fat": 3, "fruit": 4, "dairy": 2, "legume": 1,
+}
+
 
 def build_day_plan(
     food_pool: list[FoodItem],
@@ -324,6 +329,7 @@ def build_day_plan(
     target_carb_g: float,
     target_fiber_g: float,
     meals_per_day: int = 3,
+    day_index: int = 0,
     used_slugs_this_week: dict[str, int] | None = None,
 ) -> DayPlan:
     """
@@ -359,7 +365,12 @@ def build_day_plan(
         def _pick(cat: str, n: int = 1) -> list[FoodItem]:
             candidates = [f for f in available if f.category == cat
                           and food_slot in f.meal_slots]
-            return candidates[:n]
+            if not candidates:
+                return []
+            # Rotate the start point by day so each day draws different foods.
+            offset = (day_index + _CATEGORY_OFFSET.get(cat, 0)) % len(candidates)
+            rotated = candidates[offset:] + candidates[:offset]
+            return rotated[:n]
 
         selected: list[FoodItem] = []
         selected += _pick("protein")

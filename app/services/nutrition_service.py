@@ -98,7 +98,7 @@ class NutritionService:
 
         days = []
         used_slugs: dict[str, int] = {}
-        for _ in range(7):
+        for day_index in range(7):
             day = build_day_plan(
                 food_pool=filtered_pool,
                 target_kcal=target_kcal,
@@ -107,6 +107,7 @@ class NutritionService:
                 target_carb_g=macros["carb_g"],
                 target_fiber_g=macros["fiber_g"],
                 meals_per_day=profile.meals_per_day,
+                day_index=day_index,
                 used_slugs_this_week=used_slugs,
             )
             for slot in day.slots:
