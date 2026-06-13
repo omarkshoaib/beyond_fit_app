@@ -8,6 +8,8 @@ from .domain.workout.constants import (
     TEMPO_BY_PATTERN,
     CUES_BY_PATTERN,
     HARD_REFUSE_CONDITIONS,
+    SUBSTITUTION_MAP,
+    INJURY_CAVEATS,
 )
 from .domain.workout.warmup import build_warmup
 from .models import WarmupSet
@@ -159,6 +161,8 @@ class WorkoutGenerator:
 
             if ex.movement_pattern in banned_patterns:
                 continue
+            # lower_back_pain bans both hinge AND squat (per SUBSTITUTION_MAP), substituting
+            # to lunge/horizontal_pull/horizontal_push; also strips lower_back secondary muscles.
             # Extra lower_back_pain guard: also strip movements loading lower_back
             # as a secondary muscle (e.g. barbell rows), regardless of pattern.
             if "lower_back_pain" in client.limitations and "lower_back" in ex.secondary_muscles:
@@ -191,7 +195,6 @@ class WorkoutGenerator:
 
     def _banned_patterns(self, client: ClientProfile) -> set:
         """Movement patterns the client's limitations forbid (from SUBSTITUTION_MAP)."""
-        from app.domain.workout.constants import SUBSTITUTION_MAP
         banned: set = set()
         for lim in client.limitations:
             sub = SUBSTITUTION_MAP.get(lim)
@@ -200,13 +203,15 @@ class WorkoutGenerator:
         return banned
 
     def _substitute_patterns(self, client: ClientProfile, pattern: str) -> list:
-        """Safe replacement patterns for a banned pattern, in priority order."""
-        from app.domain.workout.constants import SUBSTITUTION_MAP
+        """Safe replacement patterns for a banned pattern, across ALL limitations,
+        excluding any replacement that is itself banned by another limitation."""
+        banned = self._banned_patterns(client)
+        candidates: list[str] = []
         for lim in client.limitations:
-            sub = SUBSTITUTION_MAP.get(lim, {})
-            if pattern in sub:
-                return list(sub[pattern])
-        return [pattern]
+            for sub_pat in SUBSTITUTION_MAP.get(lim, {}).get(pattern, []):
+                if sub_pat not in banned and sub_pat not in candidates:
+                    candidates.append(sub_pat)
+        return candidates if candidates else [pattern]
 
     # ── Budget helpers ─────────────────────────────────────────────
     def _budget_key(self, muscle: str) -> Optional[str]:
@@ -470,7 +475,6 @@ class WorkoutGenerator:
                     first_compound_done[0] = True
 
             # Caveat-only limitations: warn on affected patterns without excluding.
-            from app.domain.workout.constants import INJURY_CAVEATS
             for lim in client.limitations:
                 spec_cav = INJURY_CAVEATS.get(lim)
                 if spec_cav and exercise.movement_pattern in spec_cav["patterns"]:

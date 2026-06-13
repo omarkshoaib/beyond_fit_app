@@ -10,7 +10,12 @@ MRV  = Maximum Recoverable Volume (hard ceiling — exceeding causes net fatigue
 """
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, TypedDict
+
+
+class InjuryCaveat(TypedDict):
+    patterns: set[str]
+    cue: str
 
 # Budget keys match MUSCLE_TO_BUDGET_KEY in generator.py
 VOLUME_LANDMARKS: Dict[str, Dict[str, int]] = {
@@ -81,7 +86,7 @@ SUBSTITUTION_MAP: Dict[str, Dict[str, list[str]]] = {
 
 # ── Caveat-only limitations (no clean pattern substitution) ──────────────────
 # These are not excluded; affected slots get an appended coaching cue instead.
-INJURY_CAVEATS: Dict[str, Dict[str, object]] = {
+INJURY_CAVEATS: Dict[str, InjuryCaveat] = {
     "wrist_pain": {
         "patterns": {"horizontal_push", "vertical_push", "horizontal_pull", "vertical_pull"},
         "cue": "Wrist caution: neutral grip / wrist wraps; stop on sharp wrist pain.",

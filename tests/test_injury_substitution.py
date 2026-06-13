@@ -1,12 +1,9 @@
 import pytest
 from app.generator import WorkoutGenerator
 from app.models import ClientProfile
+from app.domain.workout.constants import SUBSTITUTION_MAP
 
-_BANNED = {
-    "lower_back_pain": {"hinge"},
-    "knee_pain": {"squat", "lunge"},
-    "shoulder_impingement": {"vertical_push", "horizontal_pull"},
-}
+_BANNED = {lim: set(patterns.keys()) for lim, patterns in SUBSTITUTION_MAP.items()}
 
 
 def _client(limitations):
@@ -52,8 +49,24 @@ def test_wrist_pain_adds_cue_but_does_not_exclude():
     gen = WorkoutGenerator()
     base = gen.generate(_client([]))
     wrist = gen.generate(_client(["wrist_pain"]))
-    base_n = sum(len(d.slots) for d in base.days)
-    wrist_n = sum(len(d.slots) for d in wrist.days)
-    assert wrist_n == base_n
-    cues = [c for d in wrist.days for s in d.slots for c in s.coaching_cues]
-    assert any("Wrist" in c for c in cues)
+    assert sum(len(d.slots) for d in wrist.days) == sum(len(d.slots) for d in base.days)
+    ex_map = {e.exercise_id: e for e in gen.exercise_db}
+    wrist_patterns = {"horizontal_push", "vertical_push", "horizontal_pull", "vertical_pull"}
+    for d in wrist.days:
+        for s in d.slots:
+            ex = ex_map.get(s.exercise_id)
+            if ex and ex.movement_pattern in wrist_patterns:
+                assert any("Wrist" in c for c in s.coaching_cues)
+
+
+def test_injury_does_not_collapse_vs_baseline():
+    # An injured plan should lose at most ~1 slot per day vs an uninjured one —
+    # proving substitution (incl. Tier-5) fills slots rather than dropping them.
+    gen = WorkoutGenerator()
+    base = gen.generate(_client([]))
+    for lim in ("knee_pain", "shoulder_impingement", "lower_back_pain"):
+        injured = gen.generate(_client([lim]))
+        base_n = sum(len(d.slots) for d in base.days)
+        inj_n = sum(len(d.slots) for d in injured.days)
+        assert inj_n >= base_n - len(injured.days), \
+            f"{lim}: lost too many slots ({inj_n} vs {base_n})"
