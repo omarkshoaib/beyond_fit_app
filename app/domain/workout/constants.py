@@ -79,6 +79,19 @@ SUBSTITUTION_MAP: Dict[str, Dict[str, list[str]]] = {
     },
 }
 
+# ── Caveat-only limitations (no clean pattern substitution) ──────────────────
+# These are not excluded; affected slots get an appended coaching cue instead.
+INJURY_CAVEATS: Dict[str, Dict[str, object]] = {
+    "wrist_pain": {
+        "patterns": {"horizontal_push", "vertical_push", "horizontal_pull", "vertical_pull"},
+        "cue": "Wrist caution: neutral grip / wrist wraps; stop on sharp wrist pain.",
+    },
+    "hip_flexor_tightness": {
+        "patterns": {"hinge", "lunge", "squat"},
+        "cue": "Hip caution: warm up hip flexors; reduce depth if you feel pinching.",
+    },
+}
+
 CUES_BY_PATTERN: Dict[str, list[str]] = {
     "squat":           ["Brace core, knees track toes", "Sit into hips, drive through full foot"],
     "hinge":           ["Push floor away, hinge don't squat", "Neutral spine throughout — no rounding"],

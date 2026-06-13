@@ -144,6 +144,7 @@ class WorkoutGenerator:
         # collapse a day to 2 thin slots. Competition main lifts stay powerlifter-only.
         avatars = kwargs.pop("avatars", None) or {client.avatar}
         valid_exercises = []
+        banned_patterns = self._banned_patterns(client)
         for ex in self.exercise_db:
             if not (set(ex.avatar_tags) & avatars):
                 continue
@@ -156,12 +157,11 @@ class WorkoutGenerator:
             if not has_equipment:
                 continue
 
-            skip = False
-            for limit in client.limitations:
-                if limit == "lower_back_pain" and (ex.movement_pattern == "hinge" or "lower_back" in ex.secondary_muscles):
-                    skip = True
-                    break
-            if skip:
+            if ex.movement_pattern in banned_patterns:
+                continue
+            # Extra lower_back_pain guard: also strip movements loading lower_back
+            # as a secondary muscle (e.g. barbell rows), regardless of pattern.
+            if "lower_back_pain" in client.limitations and "lower_back" in ex.secondary_muscles:
                 continue
 
             if "pattern" in kwargs and ex.movement_pattern != kwargs["pattern"]:
@@ -188,6 +188,25 @@ class WorkoutGenerator:
             valid_exercises.append(ex)
 
         return valid_exercises
+
+    def _banned_patterns(self, client: ClientProfile) -> set:
+        """Movement patterns the client's limitations forbid (from SUBSTITUTION_MAP)."""
+        from app.domain.workout.constants import SUBSTITUTION_MAP
+        banned: set = set()
+        for lim in client.limitations:
+            sub = SUBSTITUTION_MAP.get(lim)
+            if sub:
+                banned.update(sub.keys())
+        return banned
+
+    def _substitute_patterns(self, client: ClientProfile, pattern: str) -> list:
+        """Safe replacement patterns for a banned pattern, in priority order."""
+        from app.domain.workout.constants import SUBSTITUTION_MAP
+        for lim in client.limitations:
+            sub = SUBSTITUTION_MAP.get(lim, {})
+            if pattern in sub:
+                return list(sub[pattern])
+        return [pattern]
 
     # ── Budget helpers ─────────────────────────────────────────────
     def _budget_key(self, muscle: str) -> Optional[str]:
@@ -337,6 +356,15 @@ class WorkoutGenerator:
                 if ex:
                     return self._apply_override(ex, client)
 
+        # Tier 5: injury substitution — the slot's pattern is banned and no safe
+        # same-muscle option survived the earlier tiers. Fill the slot with a safe
+        # substitute pattern so the day is never left empty.
+        if pattern and pattern in self._banned_patterns(client):
+            for sub_pat in self._substitute_patterns(client, pattern):
+                ex = _pick(self._filter_exercises(client, avatars=avatars, pattern=sub_pat))
+                if ex:
+                    return self._apply_override(ex, client)
+
         return None
 
     # ── Slot Filling (template-driven) ────────────────────────────
@@ -440,6 +468,13 @@ class WorkoutGenerator:
                 slot.warmup_sets = [WarmupSet(**vars(ws)) for ws in raw_warmup]
                 if is_main:
                     first_compound_done[0] = True
+
+            # Caveat-only limitations: warn on affected patterns without excluding.
+            from app.domain.workout.constants import INJURY_CAVEATS
+            for lim in client.limitations:
+                spec_cav = INJURY_CAVEATS.get(lim)
+                if spec_cav and exercise.movement_pattern in spec_cav["patterns"]:
+                    slot.coaching_cues = list(slot.coaching_cues) + [spec_cav["cue"]]
 
             return slot
 
