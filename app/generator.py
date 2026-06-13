@@ -349,6 +349,7 @@ class WorkoutGenerator:
         prior_week: Optional[WorkoutWeek] = None,
         force_deload: bool = False,
     ) -> WorkoutDay:
+        from app.domain.workout.loadseed import seed_working_load
         deload = force_deload or self._is_deload(client.week_number)
         MAX_FATIGUE: int = self._cfg["session"]["max_fatigue"]
         s = self._cfg["sets"]
@@ -409,7 +410,6 @@ class WorkoutGenerator:
             # seed a conservative starting load from the client's baseline lifts.
             # The prior-week path above always takes precedence (we only fill a gap).
             if slot.target_weight is None:
-                from app.domain.workout.loadseed import seed_working_load
                 seeded = seed_working_load(client, exercise.movement_pattern, reps, slot_rpe)
                 if seeded is not None:
                     slot.target_weight = seeded

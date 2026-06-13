@@ -99,6 +99,8 @@ def test_week1_no_loads_when_baselines_skipped():
     gen = WorkoutGenerator()
     client = _mk_client()  # no baselines
     week = gen.generate(client)
+    # Asserts target_weight (working-set load) specifically; warm-up sets may still
+    # use a 60 kg bar fallback internally — that's expected and out of scope here.
     assert all(s.target_weight is None for d in week.days for s in d.slots)
 
 
@@ -115,3 +117,17 @@ def test_seed_does_not_override_prior_week_progression():
     progressed = [s for d in week2.days for s in d.slots
                   if s.slot_type == "main_compound" and s.target_weight is not None]
     assert progressed, "week 2 should carry autoregulated loads"
+
+    # Prove the autoregulator (not the seed) set the load.
+    # Prior actual = 120.0 kg; seed from squat_e1rm=140 would be ~110.0 kg.
+    # AutoRegulator.calculate_next_load(120, rpe_err=0, next_rpe_bump) -> 122.5 kg.
+    # ±10% clamp around 120 gives [108, 132]; seed value 110.0 falls below 115.
+    # At least one slot must be in the autoregulated band AND above the seed floor.
+    seed_value = 110.0  # floor(140 * working_pct(5, 7.0) / 2.5) * 2.5
+    assert any(
+        115.0 <= s.target_weight <= 132.0 and s.target_weight != seed_value
+        for s in progressed
+    ), (
+        f"Expected an autoregulated load in [115, 132] != seed ({seed_value}); "
+        f"got {[s.target_weight for s in progressed]}"
+    )
