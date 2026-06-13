@@ -363,3 +363,23 @@ async def test_rate_limit_blocks_second_call(test_engine, mock_bot):
         if "wait" in str(c).lower() or "minutes" in str(c).lower()
     ]
     assert len(rate_limit_calls) >= 1
+
+
+# ── Baseline-lift parser tests (Task 3) ───────────────────────────────────────
+
+from app.bot import _parse_baseline_set
+
+
+def test_parse_baseline_set_valid_forms():
+    assert _parse_baseline_set("100x5") == (100.0, 5)
+    assert _parse_baseline_set("100 x 5") == (100.0, 5)
+    assert _parse_baseline_set("60*3") == (60.0, 3)
+    assert _parse_baseline_set("82.5X4") == (82.5, 4)
+
+
+def test_parse_baseline_set_rejects_bad_and_high_reps():
+    assert _parse_baseline_set("skip") is None
+    assert _parse_baseline_set("heavy") is None
+    assert _parse_baseline_set("100x15") is None
+    assert _parse_baseline_set("100") is None
+    assert _parse_baseline_set("0x5") is None

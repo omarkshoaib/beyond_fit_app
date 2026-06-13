@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 import json
 import signal
@@ -156,6 +157,11 @@ async def safe_send_markdown(bot, chat_id, text, reply_markup=None):
 # ── Intake states (ints for backward compat) ──────────────────────────────────
 ASK_AVATAR, ASK_DAYS, ASK_EXPERIENCE, ASK_LIMITATIONS, ASK_EMAIL = range(5)
 ASK_LIMITATIONS_OTHER = "ASK_LIMITATIONS_OTHER"
+# Baseline-lift intake states (A.4). Strings keep them distinct from the ints above
+# within the single intake ConversationHandler.
+ASK_BASE_SQUAT = "ASK_BASE_SQUAT"
+ASK_BASE_BENCH = "ASK_BASE_BENCH"
+ASK_BASE_DEADLIFT = "ASK_BASE_DEADLIFT"
 
 # ── /update_profile field-picker states (strings, isolated from intake) ───────
 UPD_PICK = "UPD_PICK"
@@ -1920,6 +1926,24 @@ def _build_limitations_keyboard(selected: set) -> InlineKeyboardMarkup:
     rows.append([InlineKeyboardButton(other_label, callback_data="lim_toggle_other")])
     rows.append([InlineKeyboardButton("✅ Done", callback_data="lim_confirm")])
     return InlineKeyboardMarkup(rows)
+
+
+def _parse_baseline_set(text: str):
+    """Parse 'WxR' (weight x reps) like '100x5'. Returns (weight, reps) or None.
+
+    Rejects unparseable input, non-positive weight, and reps > 10 (the e1RM
+    formula is unreliable past 10 reps — re-ask rather than seed garbage).
+    """
+    if not text:
+        return None
+    m = re.match(r"^\s*(\d+(?:\.\d+)?)\s*[xX*]\s*(\d+)\s*$", text.strip())
+    if not m:
+        return None
+    weight = float(m.group(1))
+    reps = int(m.group(2))
+    if weight <= 0 or reps < 1 or reps > 10:
+        return None
+    return (weight, reps)
 
 
 async def handle_experience(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
