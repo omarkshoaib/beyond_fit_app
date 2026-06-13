@@ -204,14 +204,20 @@ class WorkoutGenerator:
 
     def _substitute_patterns(self, client: ClientProfile, pattern: str) -> list:
         """Safe replacement patterns for a banned pattern, across ALL limitations,
-        excluding any replacement that is itself banned by another limitation."""
+        excluding any replacement that is itself banned by another limitation.
+
+        Returns [] when no safe replacement exists (all substitutes are themselves
+        banned by a different limitation). Callers should treat an empty return as
+        'no substitute available' — do NOT fall back to the original banned pattern."""
         banned = self._banned_patterns(client)
         candidates: list[str] = []
         for lim in client.limitations:
             for sub_pat in SUBSTITUTION_MAP.get(lim, {}).get(pattern, []):
                 if sub_pat not in banned and sub_pat not in candidates:
                     candidates.append(sub_pat)
-        return candidates if candidates else [pattern]
+        # No safe substitute exists (all replacements are themselves banned) -> empty,
+        # so Tier 5 fills nothing for this slot rather than retrying a banned pattern.
+        return candidates
 
     # ── Budget helpers ─────────────────────────────────────────────
     def _budget_key(self, muscle: str) -> Optional[str]:

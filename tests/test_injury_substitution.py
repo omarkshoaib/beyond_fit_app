@@ -70,3 +70,13 @@ def test_injury_does_not_collapse_vs_baseline():
         inj_n = sum(len(d.slots) for d in injured.days)
         assert inj_n >= base_n - len(injured.days), \
             f"{lim}: lost too many slots ({inj_n} vs {base_n})"
+
+
+def test_multi_limitation_no_banned_pattern_no_collapse():
+    gen = WorkoutGenerator()
+    week = gen.generate(_client(["knee_pain", "shoulder_impingement"]))
+    used = _patterns_in_week(week, gen)
+    combined_banned = _BANNED["knee_pain"] | _BANNED["shoulder_impingement"]
+    assert not (used & combined_banned), f"Leaked banned patterns: {used & combined_banned}"
+    for d in week.days:
+        assert len(d.slots) >= 1, f"{d.day_name} collapsed under multi-limitation"
