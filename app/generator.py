@@ -405,6 +405,15 @@ class WorkoutGenerator:
                         continue
                     break
 
+            # Week-1 / no-telemetry seeding: if no prior actual set a target_weight,
+            # seed a conservative starting load from the client's baseline lifts.
+            # The prior-week path above always takes precedence (we only fill a gap).
+            if slot.target_weight is None:
+                from app.domain.workout.loadseed import seed_working_load
+                seeded = seed_working_load(client, exercise.movement_pattern, reps, slot_rpe)
+                if seeded is not None:
+                    slot.target_weight = seeded
+
             if is_compound:
                 is_main = slot_type == "main_compound" and not first_compound_done[0]
                 last_top: Optional[float] = None

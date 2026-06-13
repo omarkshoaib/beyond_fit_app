@@ -68,3 +68,50 @@ def test_bodyweight_has_no_zero_slot_days():
         wk = _gen(a, d, "beginner", ["bodyweight"])
         for day in wk.days:
             assert len(day.slots) >= 1, f"{a}/{d}d bodyweight -> {day.day_name} EMPTY"
+
+
+# ── Task 4: week-1 load seeding from baseline e1RMs ─────────────────────────
+
+from app.generator import WorkoutGenerator
+from app.models import ClientProfile
+
+
+def _mk_client(**kw):
+    base = dict(client_id="t_seed", avatar="gen_pop", training_days=3,
+                experience_level="intermediate", limitations=[],
+                available_equipment=["full_gym"], week_number=1)
+    base.update(kw)
+    return ClientProfile(**base)
+
+
+def test_week1_main_compound_gets_seeded_load_when_baseline_present():
+    gen = WorkoutGenerator()
+    client = _mk_client(squat_e1rm=140.0, bench_e1rm=100.0, deadlift_e1rm=180.0)
+    week = gen.generate(client)
+    seeded = [s for d in week.days for s in d.slots
+              if s.slot_type == "main_compound" and s.target_weight is not None]
+    assert seeded, "at least one main compound should have a seeded target_weight"
+    for s in seeded:
+        assert s.target_weight % 2.5 == 0
+
+
+def test_week1_no_loads_when_baselines_skipped():
+    gen = WorkoutGenerator()
+    client = _mk_client()  # no baselines
+    week = gen.generate(client)
+    assert all(s.target_weight is None for d in week.days for s in d.slots)
+
+
+def test_seed_does_not_override_prior_week_progression():
+    gen = WorkoutGenerator()
+    client = _mk_client(squat_e1rm=140.0, week_number=2)
+    week1 = gen.generate(_mk_client(squat_e1rm=140.0))
+    for d in week1.days:
+        for s in d.slots:
+            if s.slot_type == "main_compound":
+                s.actual_weight = 120.0
+                s.actual_rpe = s.rpe
+    week2 = gen.generate(client, prior_week=week1)
+    progressed = [s for d in week2.days for s in d.slots
+                  if s.slot_type == "main_compound" and s.target_weight is not None]
+    assert progressed, "week 2 should carry autoregulated loads"
