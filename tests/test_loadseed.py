@@ -1,4 +1,3 @@
-import math
 import pytest
 from app.models import ClientProfile
 from app.domain.workout import loadseed

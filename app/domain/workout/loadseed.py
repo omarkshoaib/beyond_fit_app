@@ -65,7 +65,7 @@ def pattern_e1rm(client: ClientProfile, pattern: str) -> Optional[float]:
         return None
     field, ratio = spec
     base = getattr(client, field, None)
-    if not base:
+    if base is None:
         return None
     return base * ratio
 
