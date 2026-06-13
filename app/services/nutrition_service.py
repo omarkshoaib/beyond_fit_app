@@ -98,6 +98,7 @@ class NutritionService:
 
         days = []
         used_slugs: dict[str, int] = {}
+        validation_warnings: list[str] = []
         for day_index in range(7):
             day = build_day_plan(
                 food_pool=filtered_pool,
@@ -110,6 +111,17 @@ class NutritionService:
                 day_index=day_index,
                 used_slugs_this_week=used_slugs,
             )
+            day_errors = validate_day(
+                day, target_kcal, macros["protein_g"], macros["fat_g"],
+                macros["fiber_g"], profile.weight_kg, strict=True,
+            )
+            if day_errors:
+                day_errors = validate_day(
+                    day, target_kcal, macros["protein_g"], macros["fat_g"],
+                    macros["fiber_g"], profile.weight_kg, strict=False,
+                )
+            if day_errors:
+                validation_warnings.append(f"Day {day_index + 1}: " + "; ".join(day_errors))
             for slot in day.slots:
                 for food, _ in slot.items:
                     used_slugs[food.slug] = used_slugs.get(food.slug, 0) + 1
@@ -129,6 +141,8 @@ class NutritionService:
             f"BMR={bmr:.0f} kcal | TDEE={tdee:.0f} kcal | "
             f"Target={target_kcal:.0f} kcal | Goal={profile.goal} ({profile.aggressiveness or 'moderate'})"
         )
+        if validation_warnings:
+            rationale += "\n[macro drift] " + " | ".join(validation_warnings)
 
         plan = NutritionPlan(
             client_id=client_id,
