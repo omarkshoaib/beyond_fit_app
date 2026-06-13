@@ -2001,23 +2001,83 @@ async def handle_limitations_confirm(update: Update, context: ContextTypes.DEFAU
     else:
         context.user_data['limitations'] = sorted(selected)
 
-    await query.edit_message_text("Almost there! What's your email address? (We'll send your plan PDF here.)")
-    return ASK_EMAIL
+    await _prompt_baseline(query.edit_message_text, "SQUAT")
+    return ASK_BASE_SQUAT
 
 
 async def handle_limitations_other(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Store free-text limitation note and proceed to email."""
+    """Store free-text limitation note and proceed to baseline intake."""
     context.user_data['limitations_notes'] = update.message.text.strip()
-    await update.message.reply_text("Almost there! What's your email address? (We'll send your plan PDF here.)")
-    return ASK_EMAIL
+    await _prompt_baseline(update.message.reply_text, "SQUAT")
+    return ASK_BASE_SQUAT
 
 
 async def handle_limitations(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Legacy free-text fallback for limitations (kept for backwards compat)."""
     text = update.message.text.strip().lower()
     context.user_data['limitations'] = [] if text == "none" else [l.strip() for l in text.split(",")]
-    await update.message.reply_text("Almost there! What's your email address? (We'll send your plan PDF here.)")
-    return ASK_EMAIL
+    await _prompt_baseline(update.message.reply_text, "SQUAT")
+    return ASK_BASE_SQUAT
+
+
+# ── Baseline-lift handlers (A.4) ──────────────────────────────────────────────
+
+def _baseline_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("Skip", callback_data="base_skip")]])
+
+
+async def _prompt_baseline(target, lift: str) -> None:
+    await target(
+        f"Optional — your best recent {lift} set? Reply like `100x5` (weight×reps, "
+        f"reps ≤ 10), or tap Skip.",
+        reply_markup=_baseline_keyboard(),
+    )
+
+
+# Maps a baseline field to the state that re-asks it (used on parse failure).
+_CURRENT_BASELINE_STATE = {
+    "squat_e1rm": ASK_BASE_SQUAT,
+    "bench_e1rm": ASK_BASE_BENCH,
+    "deadlift_e1rm": ASK_BASE_DEADLIFT,
+}
+
+
+async def _store_baseline_and_next(update, context, field: str, next_state, next_lift):
+    """Shared logic for the baseline handlers. Stores e1RM (or None) then prompts next."""
+    query = update.callback_query
+    if query is not None:                 # Skip button
+        await query.answer()
+        context.user_data[field] = None
+        send = query.edit_message_text
+    else:                                  # text reply
+        parsed = _parse_baseline_set(update.message.text)
+        if parsed is None:
+            await update.message.reply_text(
+                "Couldn't read that. Use `weight x reps`, e.g. `100x5` (reps ≤ 10), or tap Skip.",
+                reply_markup=_baseline_keyboard(),
+            )
+            return _CURRENT_BASELINE_STATE[field]   # re-ask same state
+        weight, reps = parsed
+        from app.domain.workout.loadseed import brzycki_e1rm
+        context.user_data[field] = round(brzycki_e1rm(weight, reps), 1)
+        send = update.message.reply_text
+    if next_lift is not None:
+        await _prompt_baseline(send, next_lift)
+    else:
+        await send("Almost there! What's your email address? (We'll send your plan PDF here.)")
+    return next_state
+
+
+async def handle_base_squat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await _store_baseline_and_next(update, context, "squat_e1rm", ASK_BASE_BENCH, "BENCH PRESS")
+
+
+async def handle_base_bench(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await _store_baseline_and_next(update, context, "bench_e1rm", ASK_BASE_DEADLIFT, "DEADLIFT")
+
+
+async def handle_base_deadlift(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await _store_baseline_and_next(update, context, "deadlift_e1rm", ASK_EMAIL, None)
 
 
 async def handle_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -2054,6 +2114,9 @@ async def handle_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 profile.email = email
                 profile.name = first_name
                 profile.limitations_notes = context.user_data.get('limitations_notes', profile.limitations_notes)
+                profile.squat_e1rm = context.user_data.get('squat_e1rm', profile.squat_e1rm)
+                profile.bench_e1rm = context.user_data.get('bench_e1rm', profile.bench_e1rm)
+                profile.deadlift_e1rm = context.user_data.get('deadlift_e1rm', profile.deadlift_e1rm)
                 profile.available_equipment = profile.available_equipment or ["full_gym"]
                 session.add(profile)
                 session.commit()
@@ -2074,6 +2137,9 @@ async def handle_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 email=email,
                 name=first_name,
                 limitations_notes=context.user_data.get('limitations_notes'),
+                squat_e1rm=context.user_data.get('squat_e1rm'),
+                bench_e1rm=context.user_data.get('bench_e1rm'),
+                deadlift_e1rm=context.user_data.get('deadlift_e1rm'),
             )
             session.add(profile)
             session.commit()
@@ -5148,6 +5214,18 @@ def main():
         ],
         ASK_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_email)],
         ASK_LIMITATIONS_OTHER: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_limitations_other)],
+        ASK_BASE_SQUAT: [
+            CallbackQueryHandler(handle_base_squat, pattern=r"^base_skip$"),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_base_squat),
+        ],
+        ASK_BASE_BENCH: [
+            CallbackQueryHandler(handle_base_bench, pattern=r"^base_skip$"),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_base_bench),
+        ],
+        ASK_BASE_DEADLIFT: [
+            CallbackQueryHandler(handle_base_deadlift, pattern=r"^base_skip$"),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_base_deadlift),
+        ],
     }
 
     _menu_states = {

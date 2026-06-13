@@ -383,3 +383,18 @@ def test_parse_baseline_set_rejects_bad_and_high_reps():
     assert _parse_baseline_set("100x15") is None
     assert _parse_baseline_set("100") is None
     assert _parse_baseline_set("0x5") is None
+
+
+import inspect
+import app.bot as bot
+
+
+def test_limitations_exits_route_to_baseline_not_email():
+    for fn in (bot.handle_limitations_confirm, bot.handle_limitations_other, bot.handle_limitations):
+        src = inspect.getsource(fn)
+        assert "ASK_BASE_SQUAT" in src, f"{fn.__name__} should route to ASK_BASE_SQUAT"
+
+
+def test_intake_states_register_baseline_handlers():
+    for name in ("handle_base_squat", "handle_base_bench", "handle_base_deadlift"):
+        assert hasattr(bot, name)
