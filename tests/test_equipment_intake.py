@@ -98,6 +98,23 @@ async def test_upd_equipment_saves_and_returns_to_pick(mock_bot):
 
 
 @pytest.mark.asyncio
+async def test_upd_equipment_preseeds_current_kit(mock_bot):
+    """Opening Equipment edit must pre-check the client's existing kit so adding one
+    item doesn't silently wipe the rest."""
+    from app import bot
+    cid = "cl_upd_preseed"
+    with Session(bot.engine) as s:
+        s.merge(ClientProfile(client_id=cid, avatar="gen_pop", training_days=3,
+                              experience_level="beginner", limitations=[],
+                              available_equipment=["dumbbells", "bench", "bodyweight"]))
+        s.commit()
+    ctx = make_context(mock_bot, {"upd_client_id": cid})
+    nxt = await bot.upd_pick(make_callback_update(mock_bot, data="upd:equip"), ctx)
+    assert nxt == bot.UPD_EQUIPMENT
+    assert ctx.user_data["equip_selected"] == {"dumbbells", "bench"}  # bodyweight implicit, not a box
+
+
+@pytest.mark.asyncio
 async def test_back_from_equipment_returns_to_days(mock_bot):
     from app import bot
     ctx = make_context(mock_bot, {"avatar": "gen_pop", "days": 4})

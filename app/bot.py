@@ -2534,10 +2534,15 @@ async def upd_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return UPD_EMAIL
 
     if choice == "equip":
-        context.user_data["equip_selected"] = set()
+        with Session(engine) as session:
+            _p = session.get(ClientProfile, context.user_data["upd_client_id"])
+        current = set(_p.available_equipment or []) if _p else set()
+        # Pre-seed from the client's CURRENT kit so editing adds/removes rather than
+        # wiping it. full_gym (wildcard) and bodyweight (implicit) are never checkboxes.
+        context.user_data["equip_selected"] = {t for t in current if t not in ("full_gym", "bodyweight")}
         await query.edit_message_text(
             "Check everything you have, then tap Done:",
-            reply_markup=_equipment_checklist_keyboard(set()),
+            reply_markup=_equipment_checklist_keyboard(context.user_data["equip_selected"]),
         )
         return UPD_EQUIPMENT
 
