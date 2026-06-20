@@ -103,3 +103,13 @@ def reachable_patterns(available_equipment: "list[str] | None") -> set[str]:
     avail = set(available_equipment or ["full_gym"])
     return {e["movement_pattern"] for e in get_exercise_db()
             if _has_all(e["equipment_required"], avail)}
+
+
+def equipment_gap_note(available_equipment: "list[str] | None") -> "str | None":
+    """A coach-facing warning when the client's equipment can train no pulling pattern
+    (no horizontal_pull and no vertical_pull is reachable). Returns None when fine."""
+    reach = reachable_patterns(available_equipment)
+    if "horizontal_pull" not in reach and "vertical_pull" not in reach:
+        return ("⚠️ Equipment gap: no pulling movements available for this client — "
+                "recommend a pull-up bar or resistance band.")
+    return None

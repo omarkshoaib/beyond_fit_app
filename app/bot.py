@@ -551,6 +551,10 @@ async def run_generation_and_dispatch(
             notes_section = ""
             if gen_notes:
                 notes_section = "\n\n*Generator notes:*\n" + "\n".join(f"• {n}" for n in gen_notes)
+            from app.domain.workout.equipment import equipment_gap_note
+            gap = equipment_gap_note(profile.available_equipment if profile else None)
+            if gap:
+                notes_section += f"\n\n{gap}"
 
             admin_text = (
                 f"🔔 *Plan ready for approval — Week {new_workout.week_number}*\n\n"
