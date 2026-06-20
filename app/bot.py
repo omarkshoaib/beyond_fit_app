@@ -167,6 +167,19 @@ ASK_BASE_DEADLIFT = "ASK_BASE_DEADLIFT"
 ASK_EQUIPMENT = "ASK_EQUIPMENT"
 ASK_EQUIPMENT_CUSTOM = "ASK_EQUIPMENT_CUSTOM"
 ASK_EQUIPMENT_PULLUP = "ASK_EQUIPMENT_PULLUP"
+# Ability survey state (SP-B1 C4).
+ASK_ABILITY = "ASK_ABILITY"
+_ABILITY_FAMILIES = ["squat", "hinge", "horizontal_push", "vertical_push",
+                     "horizontal_pull", "vertical_pull"]
+_ABILITY_FAMILY_PROMPT = {
+    "squat": "your SQUAT (bodyweight squat → barbell back squat)",
+    "hinge": "your HINGE / DEADLIFT (glute bridge → barbell deadlift)",
+    "horizontal_push": "your PUSH (push-ups → bench press)",
+    "vertical_push": "your OVERHEAD PRESS (pike push-up → barbell OHP)",
+    "horizontal_pull": "your ROW (inverted row → barbell row)",
+    "vertical_pull": "your PULL-UP (assisted → strict/weighted pull-up)",
+}
+_ABILITY_LEVEL = {"1": 2, "2": 3, "3": 4}  # button value -> ability tier (2/3/4)
 
 # ── /update_profile field-picker states (strings, isolated from intake) ───────
 UPD_PICK = "UPD_PICK"
@@ -2074,16 +2087,65 @@ def _parse_baseline_set(text: str):
     return (weight, reps)
 
 
+def _ability_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🌱 New / can't yet", callback_data="abil:1")],
+        [InlineKeyboardButton("💪 I can do the standard version", callback_data="abil:2")],
+        [InlineKeyboardButton("🏋️ Strong — barbell/loaded", callback_data="abil:3")],
+        [InlineKeyboardButton("⏭️ Skip — use my experience level", callback_data="abil_skip")],
+    ])
+
+
+async def _prompt_ability(send, idx: int) -> None:
+    fam = _ABILITY_FAMILIES[idx]
+    await send(
+        f"Quick ability check ({idx + 1}/6) — how's {_ABILITY_FAMILY_PROMPT[fam]}?",
+        reply_markup=_with_back(_ability_keyboard(), ASK_ABILITY),
+    )
+
+
+async def _prompt_limitations(send, context: ContextTypes.DEFAULT_TYPE) -> None:
+    selected = context.user_data.get("selected_limitations", set())
+    await send(
+        "Select any injuries or limitations:",
+        reply_markup=_with_back(_build_limitations_keyboard(selected), ASK_LIMITATIONS),
+    )
+
+
+async def handle_ability(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from app.domain.workout.ability import global_ability
+    query = update.callback_query
+    await query.answer()
+    context.user_data.setdefault("exercise_ability", {})
+    idx = context.user_data.get("ability_idx", 0)
+
+    if query.data == "abil_skip":
+        default = global_ability(context.user_data.get("experience_level", "beginner"))
+        for fam in _ABILITY_FAMILIES:
+            context.user_data["exercise_ability"].setdefault(fam, default)
+        await _prompt_limitations(query.edit_message_text, context)
+        return ASK_LIMITATIONS
+
+    level = _ABILITY_LEVEL[query.data.split(":", 1)[1]]
+    context.user_data["exercise_ability"][_ABILITY_FAMILIES[idx]] = level
+    idx += 1
+    context.user_data["ability_idx"] = idx
+    if idx >= len(_ABILITY_FAMILIES):
+        await _prompt_limitations(query.edit_message_text, context)
+        return ASK_LIMITATIONS
+    await _prompt_ability(query.edit_message_text, idx)
+    return ASK_ABILITY
+
+
 async def handle_experience(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
     context.user_data['experience_level'] = query.data
     context.user_data['selected_limitations'] = set()
-    await query.edit_message_text(
-        f"Awesome, {query.data.title()}!\n\nSelect any injuries or limitations:",
-        reply_markup=_with_back(_build_limitations_keyboard(set()), ASK_LIMITATIONS),
-    )
-    return ASK_LIMITATIONS
+    context.user_data["ability_idx"] = 0
+    context.user_data["exercise_ability"] = {}
+    await _prompt_ability(query.edit_message_text, 0)
+    return ASK_ABILITY
 
 
 async def handle_limitations_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -2175,8 +2237,10 @@ def _intake_predecessor(leaving, context: ContextTypes.DEFAULT_TYPE):
         return ASK_EQUIPMENT
     if leaving == ASK_EXPERIENCE:
         return ASK_EQUIPMENT
-    if leaving == ASK_LIMITATIONS:
+    if leaving == ASK_ABILITY:
         return ASK_EXPERIENCE
+    if leaving == ASK_LIMITATIONS:
+        return ASK_ABILITY
     if leaving == ASK_LIMITATIONS_OTHER:
         return ASK_LIMITATIONS
     if leaving == ASK_BASE_SQUAT:
@@ -2208,10 +2272,11 @@ async def _render_intake_step(state, query, context: ContextTypes.DEFAULT_TYPE):
     if state == ASK_EXPERIENCE:
         await _prompt_experience(query.edit_message_text)
         return ASK_EXPERIENCE
+    if state == ASK_ABILITY:
+        await _prompt_ability(query.edit_message_text, ud.get("ability_idx", 0))
+        return ASK_ABILITY
     if state == ASK_LIMITATIONS:
-        selected = ud.get("selected_limitations", set())
-        await query.edit_message_text("Select any injuries or limitations:",
-                                      reply_markup=_with_back(_build_limitations_keyboard(selected), ASK_LIMITATIONS))
+        await _prompt_limitations(query.edit_message_text, context)
         return ASK_LIMITATIONS
     if state == ASK_LIMITATIONS_OTHER:
         await query.edit_message_text(
@@ -2357,6 +2422,8 @@ async def handle_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                     profile.available_equipment = floor_equipment(context.user_data['available_equipment'])
                 else:
                     profile.available_equipment = profile.available_equipment or ["full_gym"]
+                if context.user_data.get('exercise_ability'):
+                    profile.exercise_ability = context.user_data['exercise_ability']
                 session.add(profile)
                 session.commit()
                 session.refresh(profile)
@@ -2379,6 +2446,7 @@ async def handle_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 squat_e1rm=context.user_data.get('squat_e1rm'),
                 bench_e1rm=context.user_data.get('bench_e1rm'),
                 deadlift_e1rm=context.user_data.get('deadlift_e1rm'),
+                exercise_ability=context.user_data.get('exercise_ability'),
             )
             session.add(profile)
             session.commit()
@@ -5550,6 +5618,10 @@ def main():
         ASK_EXPERIENCE: [
             CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
             CallbackQueryHandler(handle_experience, pattern=r"^(beginner|intermediate|advanced)$"),
+        ],
+        ASK_ABILITY: [
+            CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
+            CallbackQueryHandler(handle_ability, pattern=r"^(abil:|abil_skip)"),
         ],
         ASK_LIMITATIONS: [
             CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
