@@ -47,3 +47,8 @@ def test_ladder_rung_floor_when_ability_below_lowest():
 def test_ladder_rung_none_when_no_equipment_valid_rung():
     # vertical_pull rungs all need pull_up_bar/cable; a no-equipment client -> None (slot skips)
     assert ab.ladder_rung("vertical_pull", 5, ["bodyweight"]) is None
+
+
+def test_hinge_tier4_default_is_conventional_deadlift():
+    # cross-family invariant: tier-4 hinge main = the conventional deadlift, not the RDL
+    assert ab.ladder_rung("hinge", 4, ["full_gym"]) == "bb_deadlift_conventional"

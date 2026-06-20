@@ -14,8 +14,10 @@ FAMILIES = ["squat", "hinge", "horizontal_push", "vertical_push",
 LADDERS: dict[str, list[str]] = {
     "squat": ["bw_air_squat", "db_goblet_squat", "smith_back_squat",
               "bb_back_squat_highbar", "bb_back_squat_lowbar"],
+    # bb_deadlift_conventional before bb_romanian_deadlift (both tier 4) so the within-tier
+    # tie-break makes the CONVENTIONAL DEADLIFT the tier-4 hinge main (cross-family invariant).
     "hinge": ["bw_glute_bridge", "cable_pull_through", "db_romanian_deadlift",
-              "bb_romanian_deadlift", "bb_deadlift_conventional", "bb_deficit_deadlift"],
+              "bb_deadlift_conventional", "bb_romanian_deadlift", "bb_deficit_deadlift"],
     "horizontal_push": ["bw_knee_push_up", "machine_chest_press", "bw_push_up",
                         "db_flat_bench_press", "bb_bench_press", "bw_weighted_dip"],
     "vertical_push": ["bw_incline_pike_push_up", "smith_shoulder_press", "bw_pike_push_up",
