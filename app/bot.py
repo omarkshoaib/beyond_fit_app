@@ -2112,7 +2112,8 @@ async def handle_limitations_confirm(update: Update, context: ContextTypes.DEFAU
         context.user_data['limitations'] = sorted(s for s in selected if s != "none")
         context.user_data['_ask_limitations_other'] = True
         await query.edit_message_text(
-            "Please describe your limitation in one sentence (e.g. 'recovering from ankle sprain'):"
+            "Please describe your limitation in one sentence (e.g. 'recovering from ankle sprain'):",
+            reply_markup=_with_back(InlineKeyboardMarkup([]), ASK_LIMITATIONS_OTHER),
         )
         return ASK_LIMITATIONS_OTHER
 
@@ -2138,7 +2139,7 @@ async def handle_limitations(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """Legacy free-text fallback for limitations (kept for backwards compat)."""
     text = update.message.text.strip().lower()
     context.user_data['limitations'] = [] if text == "none" else [l.strip() for l in text.split(",")]
-    await _prompt_baseline(update.message.reply_text, "SQUAT")
+    await _prompt_baseline(update.message.reply_text, "SQUAT", back_state=ASK_BASE_SQUAT)
     return ASK_BASE_SQUAT
 
 
@@ -2205,7 +2206,8 @@ async def _render_intake_step(state, query, context: ContextTypes.DEFAULT_TYPE):
         return ASK_LIMITATIONS
     if state == ASK_LIMITATIONS_OTHER:
         await query.edit_message_text(
-            "Please describe your limitation in one sentence (e.g. 'recovering from ankle sprain'):")
+            "Please describe your limitation in one sentence (e.g. 'recovering from ankle sprain'):",
+            reply_markup=_with_back(InlineKeyboardMarkup([]), ASK_LIMITATIONS_OTHER))
         return ASK_LIMITATIONS_OTHER
     if state in (ASK_BASE_SQUAT, ASK_BASE_BENCH, ASK_BASE_DEADLIFT):
         lift = {ASK_BASE_SQUAT: "SQUAT", ASK_BASE_BENCH: "BENCH PRESS",

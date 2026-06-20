@@ -131,3 +131,20 @@ async def test_back_from_experience_returns_to_equipment(mock_bot):
     nxt = await bot.handle_intake_back(
         make_callback_update(mock_bot, data=f"intake_back:{bot.ASK_EXPERIENCE}"), ctx)
     assert nxt == bot.ASK_EQUIPMENT
+
+
+@pytest.mark.asyncio
+async def test_other_describe_step_is_not_a_dead_end(mock_bot):
+    """A client who picked 'Other' must be able to Back out of the describe prompt to the
+    limitations checklist (was a dead-end trap — the describe prompt had no Back button)."""
+    from app import bot
+    ctx = make_context(mock_bot, {"avatar": "gen_pop", "days": 4,
+                                  "experience_level": "beginner", "_ask_limitations_other": True})
+    # Back from the squat baseline lands on the describe step (since 'other' was chosen)...
+    nxt = await bot.handle_intake_back(
+        make_callback_update(mock_bot, data="intake_back:ASK_BASE_SQUAT"), ctx)
+    assert nxt == bot.ASK_LIMITATIONS_OTHER
+    # ...and Back from the describe step reaches the checklist (no longer trapped).
+    nxt = await bot.handle_intake_back(
+        make_callback_update(mock_bot, data="intake_back:ASK_LIMITATIONS_OTHER"), ctx)
+    assert nxt == bot.ASK_LIMITATIONS
