@@ -95,3 +95,39 @@ async def test_upd_equipment_saves_and_returns_to_pick(mock_bot):
         p = s.get(ClientProfile, cid)
     assert set(p.available_equipment) == {"dumbbells", "bodyweight"}
     assert nxt == bot.UPD_PICK
+
+
+@pytest.mark.asyncio
+async def test_back_from_equipment_returns_to_days(mock_bot):
+    from app import bot
+    ctx = make_context(mock_bot, {"avatar": "gen_pop", "days": 4})
+    nxt = await bot.handle_intake_back(make_callback_update(mock_bot, data="intake_back:ASK_EQUIPMENT"), ctx)
+    assert nxt == bot.ASK_DAYS
+
+
+@pytest.mark.asyncio
+async def test_back_from_baseline_computes_predecessor(mock_bot):
+    from app import bot
+    ctx = make_context(mock_bot, {"avatar": "gen_pop", "days": 4,
+                                  "experience_level": "beginner", "_ask_limitations_other": False})
+    nxt = await bot.handle_intake_back(make_callback_update(mock_bot, data="intake_back:ASK_BASE_SQUAT"), ctx)
+    assert nxt == bot.ASK_LIMITATIONS
+
+
+@pytest.mark.asyncio
+async def test_limitations_confirm_idempotent_clears_other_flag(mock_bot):
+    from app import bot
+    ctx = make_context(mock_bot, {"selected_limitations": {"knee_pain"},
+                                  "_ask_limitations_other": True})
+    await bot.handle_limitations_confirm(make_callback_update(mock_bot, data="lim_confirm"), ctx)
+    assert ctx.user_data["_ask_limitations_other"] is False
+
+
+@pytest.mark.asyncio
+async def test_back_from_experience_returns_to_equipment(mock_bot):
+    """Discriminating test: int-valued state (ASK_EXPERIENCE=2) must round-trip through callback_data."""
+    from app import bot
+    ctx = make_context(mock_bot, {"avatar": "gen_pop", "days": 4})
+    nxt = await bot.handle_intake_back(
+        make_callback_update(mock_bot, data=f"intake_back:{bot.ASK_EXPERIENCE}"), ctx)
+    assert nxt == bot.ASK_EQUIPMENT

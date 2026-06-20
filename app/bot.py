@@ -1888,7 +1888,7 @@ async def handle_avatar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     ]]
     await query.edit_message_text(
         f"Great, {display}!\n\nHow many days a week can you train?",
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        reply_markup=_with_back(InlineKeyboardMarkup(keyboard), ASK_DAYS),
     )
     return ASK_DAYS
 
@@ -1900,7 +1900,7 @@ async def handle_days(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
     await query.edit_message_text(
         "What equipment do you have access to?",
-        reply_markup=_equipment_preset_keyboard(),
+        reply_markup=_with_back(_equipment_preset_keyboard(), ASK_EQUIPMENT),
     )
     return ASK_EQUIPMENT
 
@@ -1941,7 +1941,8 @@ async def _prompt_experience(send) -> None:
         [InlineKeyboardButton("Intermediate", callback_data="intermediate")],
         [InlineKeyboardButton("Advanced", callback_data="advanced")],
     ]
-    await send("What is your experience level?", reply_markup=InlineKeyboardMarkup(keyboard))
+    await send("What is your experience level?",
+               reply_markup=_with_back(InlineKeyboardMarkup(keyboard), ASK_EXPERIENCE))
 
 
 async def handle_equipment_preset(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1961,7 +1962,7 @@ async def handle_equipment_preset(update: Update, context: ContextTypes.DEFAULT_
     if preset == "bodyweight":
         await query.edit_message_text(
             "Do you have a pull-up bar? It unlocks all your back/pull training.",
-            reply_markup=_pullup_keyboard(),
+            reply_markup=_with_back(_pullup_keyboard(), ASK_EQUIPMENT_PULLUP),
         )
         return ASK_EQUIPMENT_PULLUP
     # home (pre-checked) or custom (empty) -> open the checklist
@@ -1970,7 +1971,7 @@ async def handle_equipment_preset(update: Update, context: ContextTypes.DEFAULT_
     context.user_data["equip_selected"] = selected
     await query.edit_message_text(
         "Check everything you have, then tap Done:",
-        reply_markup=_equipment_checklist_keyboard(selected),
+        reply_markup=_with_back(_equipment_checklist_keyboard(selected), ASK_EQUIPMENT_CUSTOM),
     )
     return ASK_EQUIPMENT_CUSTOM
 
@@ -1985,7 +1986,8 @@ async def handle_equipment_toggle(update: Update, context: ContextTypes.DEFAULT_
     else:
         selected.add(tok)
     context.user_data["equip_selected"] = selected
-    await query.edit_message_reply_markup(reply_markup=_equipment_checklist_keyboard(selected))
+    await query.edit_message_reply_markup(
+        reply_markup=_with_back(_equipment_checklist_keyboard(selected), ASK_EQUIPMENT_CUSTOM))
     return ASK_EQUIPMENT_CUSTOM
 
 
@@ -2070,7 +2072,7 @@ async def handle_experience(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     context.user_data['selected_limitations'] = set()
     await query.edit_message_text(
         f"Awesome, {query.data.title()}!\n\nSelect any injuries or limitations:",
-        reply_markup=_build_limitations_keyboard(set()),
+        reply_markup=_with_back(_build_limitations_keyboard(set()), ASK_LIMITATIONS),
     )
     return ASK_LIMITATIONS
 
@@ -2093,7 +2095,8 @@ async def handle_limitations_toggle(update: Update, context: ContextTypes.DEFAUL
             selected.add(opt)
 
     context.user_data['selected_limitations'] = selected
-    await query.edit_message_reply_markup(reply_markup=_build_limitations_keyboard(selected))
+    await query.edit_message_reply_markup(
+        reply_markup=_with_back(_build_limitations_keyboard(selected), ASK_LIMITATIONS))
     return ASK_LIMITATIONS
 
 
@@ -2113,19 +2116,21 @@ async def handle_limitations_confirm(update: Update, context: ContextTypes.DEFAU
         )
         return ASK_LIMITATIONS_OTHER
 
+    context.user_data['_ask_limitations_other'] = False        # idempotent: always set
+    context.user_data.pop('limitations_notes', None)            # drop stale 'other' note on replay
     if "none" in selected or not selected:
         context.user_data['limitations'] = []
     else:
         context.user_data['limitations'] = sorted(selected)
 
-    await _prompt_baseline(query.edit_message_text, "SQUAT")
+    await _prompt_baseline(query.edit_message_text, "SQUAT", back_state=ASK_BASE_SQUAT)
     return ASK_BASE_SQUAT
 
 
 async def handle_limitations_other(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Store free-text limitation note and proceed to baseline intake."""
     context.user_data['limitations_notes'] = update.message.text.strip()
-    await _prompt_baseline(update.message.reply_text, "SQUAT")
+    await _prompt_baseline(update.message.reply_text, "SQUAT", back_state=ASK_BASE_SQUAT)
     return ASK_BASE_SQUAT
 
 
@@ -2137,17 +2142,110 @@ async def handle_limitations(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ASK_BASE_SQUAT
 
 
+# ── Intake back navigation (SP-A C3) ──────────────────────────────────────────
+
+def _with_back(markup: InlineKeyboardMarkup, leaving) -> InlineKeyboardMarkup:
+    """Append a Back row that encodes the state being left."""
+    rows = list(markup.inline_keyboard)
+    rows.append([InlineKeyboardButton("⬅️ Back", callback_data=f"intake_back:{leaving}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _intake_predecessor(leaving, context: ContextTypes.DEFAULT_TYPE):
+    """Return the state that precedes `leaving` in the intake flow."""
+    # Normalize: callback_data is always a string, but int-valued states
+    # (ASK_AVATAR=0, ASK_DAYS=1, ASK_EXPERIENCE=2, ASK_LIMITATIONS=3, ASK_EMAIL=4)
+    # arrive as their str representation and must be coerced back.
+    if isinstance(leaving, str) and leaving.lstrip("-").isdigit():
+        leaving = int(leaving)
+
+    if leaving == ASK_EQUIPMENT:
+        return ASK_DAYS
+    if leaving in (ASK_EQUIPMENT_CUSTOM, ASK_EQUIPMENT_PULLUP):
+        return ASK_EQUIPMENT
+    if leaving == ASK_EXPERIENCE:
+        return ASK_EQUIPMENT
+    if leaving == ASK_LIMITATIONS:
+        return ASK_EXPERIENCE
+    if leaving == ASK_LIMITATIONS_OTHER:
+        return ASK_LIMITATIONS
+    if leaving == ASK_BASE_SQUAT:
+        return ASK_LIMITATIONS_OTHER if context.user_data.get("_ask_limitations_other") else ASK_LIMITATIONS
+    if leaving == ASK_BASE_BENCH:
+        return ASK_BASE_SQUAT
+    if leaving == ASK_BASE_DEADLIFT:
+        return ASK_BASE_BENCH
+    if leaving == ASK_EMAIL:
+        return ASK_BASE_DEADLIFT
+    return ASK_AVATAR
+
+
+async def _render_intake_step(state, query, context: ContextTypes.DEFAULT_TYPE):
+    """Re-render a step pre-filled from committed user_data, and return its state."""
+    ud = context.user_data
+    if state == ASK_DAYS:
+        keyboard = [[InlineKeyboardButton("3 Days", callback_data="3"),
+                     InlineKeyboardButton("4 Days", callback_data="4")],
+                    [InlineKeyboardButton("5 Days", callback_data="5"),
+                     InlineKeyboardButton("6 Days", callback_data="6")]]
+        await query.edit_message_text("How many days a week can you train?",
+                                      reply_markup=_with_back(InlineKeyboardMarkup(keyboard), ASK_DAYS))
+        return ASK_DAYS
+    if state == ASK_EQUIPMENT:
+        await query.edit_message_text("What equipment do you have access to?",
+                                      reply_markup=_with_back(_equipment_preset_keyboard(), ASK_EQUIPMENT))
+        return ASK_EQUIPMENT
+    if state == ASK_EXPERIENCE:
+        await _prompt_experience(query.edit_message_text)
+        return ASK_EXPERIENCE
+    if state == ASK_LIMITATIONS:
+        selected = ud.get("selected_limitations", set())
+        await query.edit_message_text("Select any injuries or limitations:",
+                                      reply_markup=_with_back(_build_limitations_keyboard(selected), ASK_LIMITATIONS))
+        return ASK_LIMITATIONS
+    if state == ASK_LIMITATIONS_OTHER:
+        await query.edit_message_text(
+            "Please describe your limitation in one sentence (e.g. 'recovering from ankle sprain'):")
+        return ASK_LIMITATIONS_OTHER
+    if state in (ASK_BASE_SQUAT, ASK_BASE_BENCH, ASK_BASE_DEADLIFT):
+        lift = {ASK_BASE_SQUAT: "SQUAT", ASK_BASE_BENCH: "BENCH PRESS",
+                ASK_BASE_DEADLIFT: "DEADLIFT"}[state]
+        await _prompt_baseline(query.edit_message_text, lift, back_state=state)
+        return state
+    # Fallback: re-render avatar step (no Back button at the first step)
+    keyboard = [[InlineKeyboardButton("Powerlifter", callback_data="powerlifter")],
+                [InlineKeyboardButton("Powerbuilder", callback_data="powerbuilder")],
+                [InlineKeyboardButton("General Fitness", callback_data="gen_pop")]]
+    await query.edit_message_text("What is your primary training goal?",
+                                  reply_markup=InlineKeyboardMarkup(keyboard))
+    return ASK_AVATAR
+
+
+async def handle_intake_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Go back one intake step (forward-replay model). The state being LEFT is encoded
+    in callback_data as 'intake_back:<STATE>'; we compute its predecessor from
+    context.user_data and re-render that step pre-filled."""
+    query = update.callback_query
+    await query.answer()
+    leaving = query.data.split(":", 1)[1]
+    target = _intake_predecessor(leaving, context)
+    return await _render_intake_step(target, query, context)
+
+
 # ── Baseline-lift handlers (A.4) ──────────────────────────────────────────────
 
-def _baseline_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[InlineKeyboardButton("Skip", callback_data="base_skip")]])
+def _baseline_keyboard(back_state=None) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton("Skip", callback_data="base_skip")]]
+    if back_state is not None:
+        rows.append([InlineKeyboardButton("⬅️ Back", callback_data=f"intake_back:{back_state}")])
+    return InlineKeyboardMarkup(rows)
 
 
-async def _prompt_baseline(target, lift: str) -> None:
+async def _prompt_baseline(target, lift: str, back_state=None) -> None:
     await target(
         f"Optional — your best recent {lift} set? Reply like 100x5 (weight×reps, "
         f"reps ≤ 10), or tap Skip.",
-        reply_markup=_baseline_keyboard(),
+        reply_markup=_baseline_keyboard(back_state=back_state),
     )
 
 
@@ -2169,19 +2267,26 @@ async def _store_baseline_and_next(update, context, field: str, next_state, next
     else:                                  # text reply
         parsed = _parse_baseline_set(update.message.text)
         if parsed is None:
+            # Re-ask same state — keep current back button (back to predecessor)
+            current_state = _CURRENT_BASELINE_STATE[field]
             await update.message.reply_text(
                 "Couldn't read that. Use weight×reps, e.g. 100x5 (reps ≤ 10), or tap Skip.",
-                reply_markup=_baseline_keyboard(),
+                reply_markup=_baseline_keyboard(back_state=current_state),
             )
-            return _CURRENT_BASELINE_STATE[field]   # re-ask same state
+            return current_state   # re-ask same state
         weight, reps = parsed
         from app.domain.workout.loadseed import brzycki_e1rm
         context.user_data[field] = round(brzycki_e1rm(weight, reps), 1)
         send = update.message.reply_text
     if next_lift is not None:
-        await _prompt_baseline(send, next_lift)
+        # next_state is the state we're moving TO — that's the back_state for that step
+        await _prompt_baseline(send, next_lift, back_state=next_state)
     else:
-        await send("Almost there! What's your email address? (We'll send your plan PDF here.)")
+        # Email prompt — add a back-only keyboard so user can go back to deadlift
+        await send(
+            "Almost there! What's your email address? (We'll send your plan PDF here.)",
+            reply_markup=_with_back(InlineKeyboardMarkup([]), ASK_EMAIL),
+        )
     return next_state
 
 
@@ -5364,30 +5469,53 @@ def main():
 
     _intake_states = {
         ASK_AVATAR: [CallbackQueryHandler(handle_avatar, pattern=r"^(powerlifter|powerbuilder|gen_pop)$")],
-        ASK_DAYS: [CallbackQueryHandler(handle_days, pattern=r"^(3|4|5|6)$")],
-        ASK_EQUIPMENT: [CallbackQueryHandler(handle_equipment_preset, pattern=r"^equip_preset:")],
+        ASK_DAYS: [
+            CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
+            CallbackQueryHandler(handle_days, pattern=r"^(3|4|5|6)$"),
+        ],
+        ASK_EQUIPMENT: [
+            CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
+            CallbackQueryHandler(handle_equipment_preset, pattern=r"^equip_preset:"),
+        ],
         ASK_EQUIPMENT_CUSTOM: [
+            CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
             CallbackQueryHandler(handle_equipment_toggle, pattern=r"^equip_toggle_"),
             CallbackQueryHandler(handle_equipment_confirm, pattern=r"^equip_confirm$"),
         ],
-        ASK_EQUIPMENT_PULLUP: [CallbackQueryHandler(handle_equipment_pullup, pattern=r"^equip_pullup:")],
-        ASK_EXPERIENCE: [CallbackQueryHandler(handle_experience, pattern=r"^(beginner|intermediate|advanced)$")],
+        ASK_EQUIPMENT_PULLUP: [
+            CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
+            CallbackQueryHandler(handle_equipment_pullup, pattern=r"^equip_pullup:"),
+        ],
+        ASK_EXPERIENCE: [
+            CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
+            CallbackQueryHandler(handle_experience, pattern=r"^(beginner|intermediate|advanced)$"),
+        ],
         ASK_LIMITATIONS: [
+            CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
             CallbackQueryHandler(handle_limitations_toggle, pattern=r"^lim_toggle_"),
             CallbackQueryHandler(handle_limitations_confirm, pattern=r"^lim_confirm$"),
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_limitations),
         ],
-        ASK_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_email)],
-        ASK_LIMITATIONS_OTHER: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_limitations_other)],
+        ASK_EMAIL: [
+            CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_email),
+        ],
+        ASK_LIMITATIONS_OTHER: [
+            CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_limitations_other),
+        ],
         ASK_BASE_SQUAT: [
+            CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
             CallbackQueryHandler(handle_base_squat, pattern=r"^base_skip$"),
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_base_squat),
         ],
         ASK_BASE_BENCH: [
+            CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
             CallbackQueryHandler(handle_base_bench, pattern=r"^base_skip$"),
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_base_bench),
         ],
         ASK_BASE_DEADLIFT: [
+            CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
             CallbackQueryHandler(handle_base_deadlift, pattern=r"^base_skip$"),
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_base_deadlift),
         ],
