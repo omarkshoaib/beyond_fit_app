@@ -63,3 +63,15 @@ def test_generator_treats_empty_equipment_as_full_gym():
                            experience_level="beginner", limitations=[], available_equipment=[])
     week = WorkoutGenerator().generate(client)
     assert sum(len(d.slots) for d in week.days) > 0
+
+
+def test_generated_plan_is_equipment_valid_end_to_end():
+    """The headline guarantee: a non-full-gym client's generated plan contains ONLY
+    exercises whose equipment they actually have (C1 survey output -> generation ->
+    validator agree). A dumbbell-only client never receives a barbell/leg-press lift."""
+    for equip in (["dumbbells", "bench", "bodyweight"], ["bodyweight", "pull_up_bar"]):
+        client = ClientProfile(client_id="cl_e2e", avatar="gen_pop", training_days=4,
+                               experience_level="intermediate", limitations=[],
+                               available_equipment=equip)
+        week = WorkoutGenerator().generate(client)
+        assert eq.validate_equipment(week, equip) == [], f"impossible exercise for {equip}"
