@@ -551,10 +551,15 @@ async def run_generation_and_dispatch(
             notes_section = ""
             if gen_notes:
                 notes_section = "\n\n*Generator notes:*\n" + "\n".join(f"• {n}" for n in gen_notes)
-            from app.domain.workout.equipment import equipment_gap_note
+            from app.domain.workout.equipment import equipment_gap_note, validate_equipment
             gap = equipment_gap_note(profile.available_equipment if profile else None)
             if gap:
                 notes_section += f"\n\n{gap}"
+            # Add-core path (_core_choices_for_client) is already equipment-filtered — no guard needed there.
+            _gen_violations = validate_equipment(new_workout, profile.available_equipment if profile else None)
+            if _gen_violations:
+                bad_list = ", ".join(f"{v.exercise_name} (needs {', '.join(v.missing)})" for v in _gen_violations)
+                notes_section += f"\n\n🚫 *Equipment mismatch in this plan:* {bad_list}"
 
             admin_text = (
                 f"🔔 *Plan ready for approval — Week {new_workout.week_number}*\n\n"
@@ -4428,6 +4433,19 @@ async def handle_admin_feedback(update: Update, context: ContextTypes.DEFAULT_TY
                 logging.warning("client_not_found: %s", pending.client_id)
                 await update.message.reply_text("❌ Client profile not found.")
                 return ConversationHandler.END
+            from app.domain.workout.equipment import validate_equipment, equipment_alternatives
+            _violations = validate_equipment(new_workout, _feedback_client.available_equipment)
+            if _violations:
+                v = _violations[0]
+                alts = equipment_alternatives(v.exercise_id, _feedback_client.available_equipment)
+                alt_txt = "\n".join(f"• {a['name']} (`{a['exercise_id']}`)" for a in alts) or "(none in DB)"
+                await update.message.reply_text(
+                    f"🚫 That edit added *{v.exercise_name}*, which needs "
+                    f"*{', '.join(v.missing)}* — the client doesn't have it. "
+                    f"Plan NOT changed.\n\nEquipment-valid alternatives:\n{alt_txt}",
+                    parse_mode="Markdown",
+                )
+                return ConversationHandler.END
             new_msg = llm.generate_coaching_message(_feedback_client, new_workout)
 
             pending.workout_json = new_workout.model_dump_json()
@@ -5318,6 +5336,24 @@ async def handle_override(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return
 
         from_id, to_id = args[1], args[2]
+        from app.domain.workout.equipment import validate_equipment, equipment_alternatives
+        from app.models import WorkoutWeek, WorkoutDay, WorkoutSlot
+        probe = WorkoutWeek(week_number=1, days=[WorkoutDay(
+            day_name="probe",
+            slots=[WorkoutSlot(slot_order=0, slot_type="isolation", exercise_id=to_id,
+                               exercise_name=to_id, sets=1, reps="1", rpe=1)],
+            total_fatigue=1)])
+        bad = validate_equipment(probe, profile.available_equipment)
+        if bad:
+            missing = ", ".join(bad[0].missing)
+            alts = equipment_alternatives(to_id, profile.available_equipment)
+            alt_txt = "\n".join(f"  `{a['exercise_id']}` — {a['name']}" for a in alts) or "  (none in DB)"
+            await update.message.reply_text(
+                f"🚫 Can't set that override: `{to_id}` needs *{missing}*, which "
+                f"{profile.name or client_id} doesn't have.\n\nEquipment-valid alternatives:\n{alt_txt}",
+                parse_mode="Markdown",
+            )
+            return
         overrides = dict(profile.coach_overrides or {})
         overrides[from_id] = to_id
         profile.coach_overrides = overrides
