@@ -142,12 +142,26 @@ comparison (so a NULL row never throws and behaves as its `experience_level`). N
 manual `docker compose run --rm bot alembic upgrade head` on deploy (like 0020).
 
 **Ability scales:**
-- **Per-family** ability (1–5) drives anchor-slot ladder picks.
-- A **global scalar** (experience-derived: beginner→2, intermediate→3, advanced→4) gates
-  **non-anchor** slots (isolation, lunge). Reserve tier-5 for B2 progression / coach
-  override / an explicit per-family survey top level — **except** a powerlifter avatar's
-  competition main lift is **exempt** from the ceiling (an advanced powerlifter gets their
-  low-bar squat / competition bench even though those are tier 5).
+- **Per-family** ability (1–5) drives anchor-slot ladder picks AND caps every anchor-pattern
+  slot (compound and isolation) via `max_difficulty`.
+- A **global scalar** (experience-derived) gates **non-anchor** slots (isolation, lunge).
+  Experience defaults: **beginner→2, intermediate→4, advanced→4** (REVISED during
+  implementation from 2/3/4 — a tier-3 default gave a no-survey *intermediate* a push-up/Smith
+  main instead of a barbell bench, which is the wrong product; intermediate→4 restores barbell
+  mains). Reserve tier-5 for B2 progression / coach override — **except** a powerlifter
+  avatar's competition main lift is **exempt** from the ceiling (tier 5).
+
+**Implementation refinements (surfaced by adversarial testing, recorded here):**
+- The ladder pick fires for **compound** anchor slots only; an isolation slot carrying an
+  anchor pattern keeps its fatigue-bounded selection (else it received the ladder's tier-4
+  barbell compound).
+- The ladder pick bypasses `_filter_exercises`, so the chosen rung is **re-validated** against
+  the safety gates it would otherwise enforce beyond equipment — **avatar match** and the
+  **`lower_back_pain` secondary-muscle guard**; an unsafe rung falls through to the (safe,
+  ability-capped) tier fallback.
+- A pure **no-bar** bodyweight client's pull-focused day may still collapse (no pulling is
+  possible without a bar) — this remains the SP-A coach-flagged equipment gap; the real fix
+  (not generating pure-Pull days for no-bar clients) is split-selection, **deferred**.
 
 ## C4 — Ability survey at intake (6 families)
 

@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.5.0] — 2026-06-20 — SP-B1: ability-appropriate exercise selection
+
+First half of SP-B (B2 = auto-progression, deferred).
+See `docs/superpowers/plans/2026-06-20-spb1-ability-regressions.md`.
+
+### Added
+- `difficulty_tier` on every exercise + 6 sourced difficulty ladders
+  (`app/domain/workout/ability.py`); a beginner who can't do a pull-up now gets the
+  assisted pull-up / pulldown, an advanced client gets the barbell mains.
+- `ClientProfile.exercise_ability` (Alembic 0021) set by a 6-family intake survey,
+  defaulting from experience level (beginner 2 / intermediate 4 / advanced 4) when skipped.
+- Ability-governed selection: a compound anchor slot picks the client's ladder rung; no
+  exercise exceeds the client's family ability; the difficulty ceiling is never dropped in
+  fallback; the ladder pick re-validates injury/avatar safety.
+- `bw_incline_pike_push_up` regression rung; bodyweight-main check-in collects RPE not weight.
+
+### Safety
+- `_default_tier` forces every free-bar compound (barbell / trap_bar / ez_bar) to tier ≥4
+  so a beginner is never handed a heavy loaded lift through the fallback.
+
+### Deferred
+- SP-B2: auto-advancing the variant over time from check-in competence.
+
 ## [1.4.0] — 2026-06-20 — SP-A: equipment-aware plans + intake back button
 
 First of four sub-projects (SP-A..D) from client-test feedback.

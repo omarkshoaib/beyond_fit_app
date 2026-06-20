@@ -137,6 +137,21 @@ A single large in-memory list of exercise dicts (`EXPANDED_EXERCISES_DATA`). Eac
   Bodyweight floor exercises: `bw_air_squat`, `bw_reverse_lunge`, `bw_single_leg_rdl`,
   `bw_knee_push_up`, `bw_inverted_row_bar` (no regression metadata — that is SP-B). See
   `docs/superpowers/specs/2026-06-20-spa-equipment-back-button-design.md`.
+- Exercise selection is **ability-aware** (SP-B1): every exercise has a `difficulty_tier`
+  (1–5, skill/strength — NOT fatigue; barbell compounds are ≥4 by a safety backstop in
+  `exercise_db._default_tier`, incl. trap_bar/ez_bar). `app/domain/workout/ability.py`
+  holds the 6 `LADDERS` (bodyweight→barbell), `client_ability` (per-family, NULL→experience
+  default), `global_ability` (non-anchor scalar), and `ladder_rung` (highest tier ≤ ability,
+  equipment-valid, floor = lowest rung). A 6-family intake survey sets
+  `ClientProfile.exercise_ability` (Alembic 0021; experience defaults beginner=2 /
+  intermediate=4 / advanced=4, so a no-survey intermediate still gets barbell mains).
+  `_select_for_slot`: a **compound** anchor slot picks the ladder rung (re-validated against
+  avatar + `lower_back_pain` secondary, since the ladder bypasses `_filter_exercises`);
+  isolation slots keep their fatigue-bounded selection; the `max_difficulty` ceiling is
+  threaded through **every** fallback tier and never dropped (so a beginner never gets an
+  above-ability lift). Powerlifter competition mains are exempt (tier 5). A bodyweight main
+  collects RPE (not weight) at check-in. Variation auto-progression over time is **SP-B2**
+  (deferred). See `docs/superpowers/specs/2026-06-20-spb1-ability-regressions-design.md`.
 
 ## Environment variables
 
