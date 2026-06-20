@@ -17,6 +17,7 @@ class Exercise(BaseModel):
     equipment_required: List[str]
     avatar_tags: List[str]
     biomechanical_focus: Optional[str] = None
+    difficulty_tier: int = 2
 
 
 class ClientProfile(SQLModel, table=True):

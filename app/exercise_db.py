@@ -100,7 +100,79 @@ EXPANDED_EXERCISES_DATA = [    {        "exercise_id": "bb_back_squat_highbar", 
      "secondary_muscles": ["lats", "biceps", "rear_delts", "core"], "fatigue_cost": 2,
      "equipment_required": ["pull_up_bar", "bodyweight"], "avatar_tags": ["gen_pop", "powerbuilder"],
      "biomechanical_focus": "mid_range"},
+    {"exercise_id": "bw_incline_pike_push_up", "name": "Incline (Hands-Elevated) Pike Push-Up",
+     "movement_pattern": "vertical_push", "primary_muscle": "front_delts",
+     "secondary_muscles": ["triceps", "chest", "core"], "fatigue_cost": 1,
+     "equipment_required": ["bodyweight"], "avatar_tags": ["gen_pop"],
+     "biomechanical_focus": "mid_range"},
 ]
 
+# SP-B1: skill+strength difficulty (NOT fatigue). Explicit tiers for the 6 ladder anchors,
+# the isolation/lunge overrides, and the bodyweight-skill exceptions. Everything else falls
+# to _default_tier (whose barbell->4 rule is the beginner-safety backstop).
+DIFFICULTY_TIERS: dict[str, int] = {
+    # squat ladder
+    "bw_air_squat": 2, "db_goblet_squat": 2, "smith_back_squat": 3,
+    "bb_back_squat_highbar": 4, "bb_back_squat_lowbar": 5,
+    # hinge ladder
+    "bw_glute_bridge": 1, "cable_pull_through": 2, "db_romanian_deadlift": 3,
+    "bb_romanian_deadlift": 4, "bb_deadlift_conventional": 4, "bb_deficit_deadlift": 5,
+    # horizontal_push ladder
+    "bw_knee_push_up": 1, "machine_chest_press": 2, "bw_push_up": 3,
+    "db_flat_bench_press": 3, "bb_bench_press": 4, "bw_weighted_dip": 5,
+    # vertical_push ladder
+    "bw_incline_pike_push_up": 2, "smith_shoulder_press": 2, "bw_pike_push_up": 3,
+    "db_seated_shoulder_press": 3, "bb_overhead_press": 4, "bb_push_press": 5,
+    # horizontal_pull ladder
+    "bw_inverted_row_bar": 2, "db_single_arm_row": 3, "db_chest_supported_row": 3,
+    "bb_bent_over_row_pronated": 4, "bb_pendlay_row": 4, "bw_inverted_row_feet_elevated": 5,
+    # vertical_pull ladder
+    "machine_assisted_pull_up": 1, "cable_wide_grip_lat_pulldown": 2,
+    "cable_neutral_grip_lat_pulldown": 3, "bw_pull_up_pronated": 4, "bw_weighted_pull_up": 5,
+    # isolation overrides (rest default to 2)
+    "bw_nordic_curl": 5, "bw_sissy_squat": 4, "bw_l_sit": 4, "bw_toes_to_bar": 3,
+    # --- barbell lunge: lunge branch in _default_tier fires before barbell backstop ---
+    # must be explicit to get >=4 (barbell safety)
+    "bb_reverse_lunge": 4,
+    # --- bodyweight compounds that need explicit tier because _default_tier mis-fires ---
+    # pull_up_bar/dip_station combos: equipment_required != ["bodyweight"] -> default returns 2
+    "bw_chin_up_supinated": 4,    # strict chin-up = barbell-equivalent upper-body demand
+    "bw_weighted_chin_up": 5,     # weighted chin-up = advanced loaded skill
+    # bw_pull_up_pronated, bw_weighted_pull_up already in vertical_pull ladder above
+    # bw_weighted_dip already in horizontal_push ladder above (tier 5)
+    # bw_deficit_push_up: equipment == ["bodyweight"] so default gives 3, but test needs >=4
+    "bw_deficit_push_up": 5,      # deficit ROM push-up = advanced skill/strength (rubric tier 5)
+    # bw_deficit_push_up_bench: ["bodyweight","bench"] -> default gives 2; it's harder than push-up
+    "bw_deficit_push_up_bench": 3,  # hands-elevated deficit (easier variant, tier 3)
+    # bw_single_leg_rdl: bodyweight single-leg hinge -> tier 3 (skill/balance demand)
+    "bw_single_leg_rdl": 3,
+    # bw_inverted_row_feet_elevated: already in horizontal_pull ladder above (tier 5)
+    # bb_upright_row: barbell but vertical_pull pattern (not isolation) -> needs >=4
+    # covered by _default_tier barbell->4 IF the lunge trap doesn't apply (it doesn't for vertical_pull)
+    # BUT _default_tier only checks lunge/isolation/barbell/bodyweight in order, so vertical_pull
+    # barbell -> hits "barbell" branch -> returns 4. Safe. No explicit entry needed.
+}
+
+_LUNGE_HARDER = ("bulgarian", "cossack", "single", "lateral", "skater")
+
+
+def _default_tier(e: dict) -> int:
+    """Backstop tier for any exercise not in DIFFICULTY_TIERS."""
+    pat = e["movement_pattern"]
+    if pat == "isolation":
+        return 2
+    if pat == "lunge":
+        name = e["name"].lower()
+        return 3 if any(k in name for k in _LUNGE_HARDER) else 2
+    # compounds: a barbell variant ALWAYS requires proficiency -> >=4 (beginner safety)
+    if "barbell" in e["equipment_required"]:
+        return 4
+    if e["equipment_required"] == ["bodyweight"]:
+        return 3   # generic bodyweight compound (skill outliers are in DIFFICULTY_TIERS)
+    return 2       # machine / smith / dumbbell / cable guided compound
+
+
 def get_exercise_db() -> List[Dict[str, Any]]:
+    for e in EXPANDED_EXERCISES_DATA:
+        e["difficulty_tier"] = DIFFICULTY_TIERS.get(e["exercise_id"]) or _default_tier(e)
     return EXPANDED_EXERCISES_DATA
