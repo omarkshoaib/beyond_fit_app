@@ -65,6 +65,7 @@ from app.settings import get_settings
 from app.adapters.llm.extractors import extract_checkin, render_digest
 from app.adapters.llm.openrouter import OpenRouterClient
 from app.domain.workout.autoregulation import derive_plan_delta, apply_delta
+from app.domain.workout.equipment import floor_equipment
 
 load_dotenv()
 
@@ -162,6 +163,10 @@ ASK_LIMITATIONS_OTHER = "ASK_LIMITATIONS_OTHER"
 ASK_BASE_SQUAT = "ASK_BASE_SQUAT"
 ASK_BASE_BENCH = "ASK_BASE_BENCH"
 ASK_BASE_DEADLIFT = "ASK_BASE_DEADLIFT"
+# Equipment survey states (SP-A C1). Strings keep them distinct from the intake ints.
+ASK_EQUIPMENT = "ASK_EQUIPMENT"
+ASK_EQUIPMENT_CUSTOM = "ASK_EQUIPMENT_CUSTOM"
+ASK_EQUIPMENT_PULLUP = "ASK_EQUIPMENT_PULLUP"
 
 # ── /update_profile field-picker states (strings, isolated from intake) ───────
 UPD_PICK = "UPD_PICK"
@@ -1892,12 +1897,124 @@ async def handle_days(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     await query.answer()
     context.user_data['days'] = int(query.data)
 
+    await query.edit_message_text(
+        "What equipment do you have access to?",
+        reply_markup=_equipment_preset_keyboard(),
+    )
+    return ASK_EQUIPMENT
+
+
+def _equipment_preset_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🏢 Commercial gym (everything)", callback_data="equip_preset:commercial")],
+        [InlineKeyboardButton("🏠 Home gym — customize", callback_data="equip_preset:home")],
+        [InlineKeyboardButton("🧰 Minimal (bodyweight + pull-up bar)", callback_data="equip_preset:minimal")],
+        [InlineKeyboardButton("🧍 Bodyweight only", callback_data="equip_preset:bodyweight")],
+        [InlineKeyboardButton("⚙️ Custom — pick each item", callback_data="equip_preset:custom")],
+    ])
+
+
+def _equipment_checklist_keyboard(selected: set) -> InlineKeyboardMarkup:
+    from app.domain.workout.equipment import CHECKLIST_TOKENS
+    rows = []
+    for i in range(0, len(CHECKLIST_TOKENS), 2):
+        row = []
+        for tok in CHECKLIST_TOKENS[i:i + 2]:
+            label = f"✓ {tok}" if tok in selected else tok
+            row.append(InlineKeyboardButton(label, callback_data=f"equip_toggle_{tok}"))
+        rows.append(row)
+    rows.append([InlineKeyboardButton("✅ Done", callback_data="equip_confirm")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _pullup_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Yes", callback_data="equip_pullup:yes"),
+        InlineKeyboardButton("❌ No", callback_data="equip_pullup:no"),
+    ]])
+
+
+async def _prompt_experience(send) -> None:
     keyboard = [
         [InlineKeyboardButton("Beginner", callback_data="beginner")],
         [InlineKeyboardButton("Intermediate", callback_data="intermediate")],
         [InlineKeyboardButton("Advanced", callback_data="advanced")],
     ]
-    await query.edit_message_text("What is your experience level?", reply_markup=InlineKeyboardMarkup(keyboard))
+    await send("What is your experience level?", reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def handle_equipment_preset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from app.domain.workout.equipment import EQUIPMENT_PRESETS
+    query = update.callback_query
+    await query.answer()
+    preset = query.data.split(":", 1)[1]
+    context.user_data["equip_preset"] = preset
+    if preset == "commercial":
+        context.user_data["available_equipment"] = list(EQUIPMENT_PRESETS["commercial"])
+        await _prompt_experience(query.edit_message_text)
+        return ASK_EXPERIENCE
+    if preset == "minimal":
+        context.user_data["available_equipment"] = list(EQUIPMENT_PRESETS["minimal"])
+        await _prompt_experience(query.edit_message_text)
+        return ASK_EXPERIENCE
+    if preset == "bodyweight":
+        await query.edit_message_text(
+            "Do you have a pull-up bar? It unlocks all your back/pull training.",
+            reply_markup=_pullup_keyboard(),
+        )
+        return ASK_EQUIPMENT_PULLUP
+    # home (pre-checked) or custom (empty) -> open the checklist
+    selected = set(EQUIPMENT_PRESETS["home"]) if preset == "home" else set()
+    selected.discard("bodyweight")  # bodyweight is implicit, not a checkbox
+    context.user_data["equip_selected"] = selected
+    await query.edit_message_text(
+        "Check everything you have, then tap Done:",
+        reply_markup=_equipment_checklist_keyboard(selected),
+    )
+    return ASK_EQUIPMENT_CUSTOM
+
+
+async def handle_equipment_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    tok = query.data[len("equip_toggle_"):]
+    selected: set = context.user_data.get("equip_selected", set())
+    if tok in selected:
+        selected.discard(tok)
+    else:
+        selected.add(tok)
+    context.user_data["equip_selected"] = selected
+    await query.edit_message_reply_markup(reply_markup=_equipment_checklist_keyboard(selected))
+    return ASK_EQUIPMENT_CUSTOM
+
+
+async def handle_equipment_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from app.domain.workout.equipment import floor_equipment
+    query = update.callback_query
+    await query.answer()
+    selected = sorted(context.user_data.get("equip_selected", set()))
+    # bodyweight is always available; persist it alongside the picked machines.
+    tokens = floor_equipment(selected + ["bodyweight"] if selected else [])
+    context.user_data["available_equipment"] = tokens
+    await _prompt_experience(query.edit_message_text)
+    return ASK_EXPERIENCE
+
+
+async def handle_equipment_pullup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    answer = query.data.split(":", 1)[1]
+    if answer == "yes":
+        context.user_data["available_equipment"] = ["bodyweight", "pull_up_bar"]
+        await _prompt_experience(query.edit_message_text)
+    else:
+        context.user_data["available_equipment"] = ["bodyweight"]
+        await query.edit_message_text(
+            "Heads up: bodyweight-only means *no back/pull training* until you get a "
+            "pull-up bar or your coach adds bands. Your coach will see this.",
+            parse_mode="Markdown",
+        )
+        await _prompt_experience(query.message.reply_text)
     return ASK_EXPERIENCE
 
 
@@ -2120,7 +2237,10 @@ async def handle_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                     profile.bench_e1rm = context.user_data['bench_e1rm']
                 if context.user_data.get('deadlift_e1rm') is not None:
                     profile.deadlift_e1rm = context.user_data['deadlift_e1rm']
-                profile.available_equipment = profile.available_equipment or ["full_gym"]
+                if context.user_data.get('available_equipment'):
+                    profile.available_equipment = floor_equipment(context.user_data['available_equipment'])
+                else:
+                    profile.available_equipment = profile.available_equipment or ["full_gym"]
                 session.add(profile)
                 session.commit()
                 session.refresh(profile)
@@ -2135,7 +2255,7 @@ async def handle_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 training_days=context.user_data.get('days', 3),
                 experience_level=context.user_data.get('experience_level', 'intermediate'),
                 limitations=context.user_data.get('limitations', []),
-                available_equipment=["full_gym"],
+                available_equipment=floor_equipment(context.user_data.get('available_equipment')),
                 week_number=1,
                 email=email,
                 name=first_name,
@@ -5209,6 +5329,12 @@ def main():
     _intake_states = {
         ASK_AVATAR: [CallbackQueryHandler(handle_avatar, pattern=r"^(powerlifter|powerbuilder|gen_pop)$")],
         ASK_DAYS: [CallbackQueryHandler(handle_days, pattern=r"^(3|4|5|6)$")],
+        ASK_EQUIPMENT: [CallbackQueryHandler(handle_equipment_preset, pattern=r"^equip_preset:")],
+        ASK_EQUIPMENT_CUSTOM: [
+            CallbackQueryHandler(handle_equipment_toggle, pattern=r"^equip_toggle_"),
+            CallbackQueryHandler(handle_equipment_confirm, pattern=r"^equip_confirm$"),
+        ],
+        ASK_EQUIPMENT_PULLUP: [CallbackQueryHandler(handle_equipment_pullup, pattern=r"^equip_pullup:")],
         ASK_EXPERIENCE: [CallbackQueryHandler(handle_experience, pattern=r"^(beginner|intermediate|advanced)$")],
         ASK_LIMITATIONS: [
             CallbackQueryHandler(handle_limitations_toggle, pattern=r"^lim_toggle_"),
