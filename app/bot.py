@@ -4278,13 +4278,28 @@ def _select_checkin_slots(week: WorkoutWeek) -> list[tuple[str, WorkoutSlot]]:
     ]
 
 
+# Equipment tokens that carry an external, progressable load. A "bodyweight" main is one
+# with NO such token (air squat, push-up, pull-up, inverted row) — NOT merely a slot whose
+# target_weight is None: an UNSEEDED barbell main (optional baselines skipped) also has
+# target_weight None, and must still be asked its weight so the autoregulator can progress it.
+_LOADABLE_EQUIP = {
+    "barbell", "dumbbells", "kettlebell", "ez_bar", "trap_bar", "cable_machine",
+    "smith_machine", "leg_press_machine", "leg_extension_machine", "leg_curl_machine",
+}
+
+
 def _checkin_slot_dicts(main_slots) -> list[dict]:
-    """Build the structured check-in slot dicts; flag bodyweight mains (no external load)."""
-    return [
-        {"day": d, "exercise_id": s.exercise_id, "exercise_name": s.exercise_name,
-         "rpe": s.rpe, "bodyweight": s.target_weight is None}
-        for d, s in main_slots
-    ]
+    """Build the structured check-in slot dicts; flag bodyweight mains by EQUIPMENT (no
+    loadable token), not by target_weight (unseeded barbell mains also have None)."""
+    from app.exercise_db import get_exercise_db
+    eq_by_id = {e["exercise_id"]: e["equipment_required"] for e in get_exercise_db()}
+    out = []
+    for d, s in main_slots:
+        eq = eq_by_id.get(s.exercise_id, [])
+        bodyweight = "bodyweight" in eq and not any(t in _LOADABLE_EQUIP for t in eq)
+        out.append({"day": d, "exercise_id": s.exercise_id, "exercise_name": s.exercise_name,
+                    "rpe": s.rpe, "bodyweight": bodyweight})
+    return out
 
 
 async def _prompt_checkin_slot(send, slot: dict, week_number: int = None) -> int:
