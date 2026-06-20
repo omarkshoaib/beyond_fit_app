@@ -18,8 +18,11 @@ def test_ladders_are_nondecreasing_in_tier_and_ids_exist():
         assert tiers == sorted(tiers), f"{fam} ladder not ascending: {tiers}"
 
 def test_global_ability_from_experience():
+    # intermediate defaults to 4 so a no-survey intermediate gets BARBELL mains (a tier-3
+    # default gave them a push-up/Smith main — wrong). advanced stays 4 (tier-5 reserved
+    # for the powerlifter exemption / B2, not handed to a default 'advanced' client).
     assert ab.global_ability("beginner") == 2
-    assert ab.global_ability("intermediate") == 3
+    assert ab.global_ability("intermediate") == 4
     assert ab.global_ability("advanced") == 4
 
 def test_client_ability_coerces_none_to_experience_default():

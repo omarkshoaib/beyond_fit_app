@@ -189,6 +189,8 @@ class WorkoutGenerator:
                 continue
             if "exact_fatigue" in kwargs and ex.fatigue_cost != kwargs["exact_fatigue"]:
                 continue
+            if "max_difficulty" in kwargs and ex.difficulty_tier > kwargs["max_difficulty"]:
+                continue
 
             valid_exercises.append(ex)
 
@@ -320,10 +322,40 @@ class WorkoutGenerator:
         # Powerlifter accessory/isolation slots may pull from the (much larger)
         # powerbuilder pool; only the competition main lift stays powerlifter-only.
         is_main = "main" in slot_type
+        is_compound = slot_type in ("main_compound", "secondary_compound")
         if client.avatar == "powerlifter" and not is_main:
             avatars = {"powerlifter", "powerbuilder"}
         else:
             avatars = {client.avatar}
+
+        # ── Ability gate (SP-B1 C5) ────────────────────────────────────────
+        # The ladder governs COMPOUND anchor slots only; an isolation slot that carries
+        # an anchor pattern must NOT receive the ladder's heavy compound (it keeps its
+        # fatigue-bounded selection + the difficulty ceiling).
+        from app.domain.workout.ability import LADDERS, client_ability, ladder_rung, global_ability
+        if pattern in LADDERS:
+            ability = client_ability(client.experience_level, client.exercise_ability, pattern)
+            if client.avatar == "powerlifter" and is_main:  # competition mains exempt
+                ability = 5
+            max_diff = ability   # cap ALL anchor-pattern slots (compound AND isolation)
+            # Ladder PICK only for COMPOUND, non-injury-banned slots — an isolation slot
+            # tagged with an anchor pattern keeps its fatigue-bounded selection (capped by
+            # max_diff); a banned anchor pattern falls to the Tier-5 injury substitution.
+            if is_compound and pattern not in self._banned_patterns(client):
+                rung_id = ladder_rung(pattern, ability, client.available_equipment)
+                if rung_id and rung_id not in used_ids:
+                    ex = next((e for e in self.exercise_db if e.exercise_id == rung_id), None)
+                    # The ladder pick bypasses _filter_exercises, so re-apply the SAME
+                    # safety gates it enforces beyond equipment: avatar match + the
+                    # lower_back_pain secondary-muscle guard. If the rung is unsafe, fall
+                    # through to the tier fallback (safe + ability-capped via max_diff).
+                    if ex and (set(ex.avatar_tags) & avatars) and not (
+                        "lower_back_pain" in (client.limitations or [])
+                        and "lower_back" in ex.secondary_muscles
+                    ):
+                        return self._apply_override(ex, client)
+        else:
+            max_diff = global_ability(client.experience_level)
 
         def _pick(candidates: List[Exercise]) -> Optional[Exercise]:
             candidates = [c for c in candidates if c.exercise_id not in used_ids]
@@ -335,14 +367,16 @@ class WorkoutGenerator:
         if pattern and muscle:
             ex = _pick(self._filter_exercises(client, avatars=avatars, pattern=pattern,
                                               primary_muscle=muscle,
-                                              min_fatigue=min_fat, max_fatigue=max_fat))
+                                              min_fatigue=min_fat, max_fatigue=max_fat,
+                                              max_difficulty=max_diff))
             if ex:
                 return self._apply_override(ex, client)
 
         # Tier 2: muscle only (drop pattern requirement)
         if muscle:
             ex = _pick(self._filter_exercises(client, avatars=avatars, primary_muscle=muscle,
-                                              min_fatigue=min_fat, max_fatigue=max_fat))
+                                              min_fatigue=min_fat, max_fatigue=max_fat,
+                                              max_difficulty=max_diff))
             if ex:
                 return self._apply_override(ex, client)
 
@@ -352,19 +386,23 @@ class WorkoutGenerator:
             if mg:
                 ex = _pick(self._filter_exercises(client, avatars=avatars, pattern=pattern,
                                                   muscle_group=mg,
-                                                  min_fatigue=min_fat, max_fatigue=max_fat))
+                                                  min_fatigue=min_fat, max_fatigue=max_fat,
+                                                  max_difficulty=max_diff))
                 if ex:
                     return self._apply_override(ex, client)
 
         # Tier 4: last-resort — any exercise for this muscle (or group), dropping
         # fatigue bounds, so a day never ends up empty/thin when SOME option exists.
+        # NOTE: difficulty ceiling is preserved (never dropped) even at last-resort.
         if muscle:
-            ex = _pick(self._filter_exercises(client, avatars=avatars, primary_muscle=muscle))
+            ex = _pick(self._filter_exercises(client, avatars=avatars, primary_muscle=muscle,
+                                              max_difficulty=max_diff))
             if ex:
                 return self._apply_override(ex, client)
             mg = self._muscle_group(muscle)
             if mg:
-                ex = _pick(self._filter_exercises(client, avatars=avatars, muscle_group=mg))
+                ex = _pick(self._filter_exercises(client, avatars=avatars, muscle_group=mg,
+                                                  max_difficulty=max_diff))
                 if ex:
                     return self._apply_override(ex, client)
 
@@ -373,7 +411,8 @@ class WorkoutGenerator:
         # substitute pattern so the day is never left empty.
         if pattern and pattern in self._banned_patterns(client):
             for sub_pat in self._substitute_patterns(client, pattern):
-                ex = _pick(self._filter_exercises(client, avatars=avatars, pattern=sub_pat))
+                ex = _pick(self._filter_exercises(client, avatars=avatars, pattern=sub_pat,
+                                                  max_difficulty=max_diff))
                 if ex:
                     return self._apply_override(ex, client)
 

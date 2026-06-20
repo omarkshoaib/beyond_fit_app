@@ -28,7 +28,7 @@ LADDERS: dict[str, list[str]] = {
                       "cable_neutral_grip_lat_pulldown", "bw_pull_up_pronated", "bw_weighted_pull_up"],
 }
 
-_EXPERIENCE_DEFAULT = {"beginner": 2, "intermediate": 3, "advanced": 4}
+_EXPERIENCE_DEFAULT = {"beginner": 2, "intermediate": 4, "advanced": 4}
 
 
 def global_ability(experience_level: str) -> int:
