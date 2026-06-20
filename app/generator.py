@@ -151,9 +151,10 @@ class WorkoutGenerator:
             if not (set(ex.avatar_tags) & avatars):
                 continue
 
+            avail = client.available_equipment or ["full_gym"]   # empty -> wildcard (legacy-safe)
             has_equipment = True
             for eq in ex.equipment_required:
-                if eq not in client.available_equipment and "full_gym" not in client.available_equipment:
+                if eq not in avail and "full_gym" not in avail:
                     has_equipment = False
                     break
             if not has_equipment:
