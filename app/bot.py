@@ -176,6 +176,7 @@ UPD_EXP = "UPD_EXP"
 UPD_LIM = "UPD_LIM"
 UPD_LIM_OTHER = "UPD_LIM_OTHER"
 UPD_EMAIL = "UPD_EMAIL"
+UPD_EQUIPMENT = "UPD_EQUIPMENT"
 
 # ── Admin states ──────────────────────────────────────────────────────────────
 ADMIN_FEEDBACK = 100
@@ -2294,6 +2295,7 @@ def _upd_pick_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("💪 Experience", callback_data="upd:exp")],
         [InlineKeyboardButton("⚠️ Limitations", callback_data="upd:limit")],
         [InlineKeyboardButton("📧 Email", callback_data="upd:email")],
+        [InlineKeyboardButton("🏋️ Equipment", callback_data="upd:equip")],
         [InlineKeyboardButton("🔄 Regenerate plan with current settings", callback_data="upd:regen")],
         [InlineKeyboardButton("✅ Done", callback_data="upd:done")],
     ])
@@ -2304,7 +2306,8 @@ def _upd_summary_line(profile: ClientProfile) -> str:
         f"Current: *{_AVATAR_LABEL.get(profile.avatar, profile.avatar)}* · "
         f"*{profile.training_days}d/wk* · *{profile.experience_level}* · "
         f"limitations: {', '.join(profile.limitations) if profile.limitations else 'none'} · "
-        f"email: {profile.email or '—'}"
+        f"email: {profile.email or '—'} · "
+        f"equipment: {', '.join(profile.available_equipment) if profile.available_equipment else 'full_gym'}"
     )
 
 
@@ -2413,6 +2416,14 @@ async def upd_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             "Send your new email address (we'll use it for the plan PDF). Type /cancel to abort."
         )
         return UPD_EMAIL
+
+    if choice == "equip":
+        context.user_data["equip_selected"] = set()
+        await query.edit_message_text(
+            "Check everything you have, then tap Done:",
+            reply_markup=_equipment_checklist_keyboard(set()),
+        )
+        return UPD_EQUIPMENT
 
     return UPD_PICK
 
@@ -2551,6 +2562,32 @@ async def upd_set_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         parse_mode="Markdown",
         reply_markup=_upd_pick_keyboard(),
     )
+    return UPD_PICK
+
+
+async def upd_equipment_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    query = update.callback_query
+    await query.answer()
+    tok = query.data[len("equip_toggle_"):]
+    selected: set = context.user_data.get("equip_selected", set())
+    if tok in selected:
+        selected.discard(tok)
+    else:
+        selected.add(tok)
+    context.user_data["equip_selected"] = selected
+    await query.edit_message_reply_markup(reply_markup=_equipment_checklist_keyboard(selected))
+    return UPD_EQUIPMENT
+
+
+async def upd_equipment_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    query = update.callback_query
+    await query.answer()
+    selected = sorted(context.user_data.get("equip_selected", set()))
+    tokens = floor_equipment(selected + ["bodyweight"] if selected else [])
+    client_id = context.user_data["upd_client_id"]
+    _save_profile_field(client_id, available_equipment=tokens)
+    context.user_data["upd_dirty"] = True
+    await _upd_show_menu(query, client_id, dirty_note=f"✅ Equipment set to: *{', '.join(tokens)}*.")
     return UPD_PICK
 
 
@@ -5419,6 +5456,10 @@ def main():
             ],
             UPD_LIM_OTHER: [MessageHandler(filters.TEXT & ~filters.COMMAND, upd_lim_other)],
             UPD_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, upd_set_email)],
+            UPD_EQUIPMENT: [
+                CallbackQueryHandler(upd_equipment_toggle, pattern=r"^equip_toggle_"),
+                CallbackQueryHandler(upd_equipment_confirm, pattern=r"^equip_confirm$"),
+            ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,

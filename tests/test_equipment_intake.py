@@ -1,6 +1,8 @@
 """SP-A C1: equipment survey at intake."""
 import pytest
 from unittest.mock import AsyncMock
+from sqlmodel import Session
+from app.models import ClientProfile  # ensures SQLModel.metadata is populated before test_engine fixture
 from tests.conftest import make_callback_update, make_context
 
 
@@ -75,3 +77,21 @@ async def test_pullup_no_sets_bodyweight_and_sends_new_message(mock_bot):
     # (the experience prompt as a NEW message — proving no double-edit).
     mock_bot.edit_message_text.assert_called_once()
     mock_bot.send_message.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_upd_equipment_saves_and_returns_to_pick(mock_bot):
+    from app import bot
+    # bot.engine is replaced by the autouse patch_engine fixture with the per-test SQLite DB.
+    cid = "cl_upd_equip"
+    with Session(bot.engine) as s:
+        s.merge(ClientProfile(client_id=cid, avatar="gen_pop", training_days=3,
+                              experience_level="beginner", limitations=[],
+                              available_equipment=["full_gym"]))
+        s.commit()
+    ctx = make_context(mock_bot, {"upd_client_id": cid, "equip_selected": {"dumbbells"}})
+    nxt = await bot.upd_equipment_confirm(make_callback_update(mock_bot, data="equip_confirm"), ctx)
+    with Session(bot.engine) as s:
+        p = s.get(ClientProfile, cid)
+    assert set(p.available_equipment) == {"dumbbells", "bodyweight"}
+    assert nxt == bot.UPD_PICK
