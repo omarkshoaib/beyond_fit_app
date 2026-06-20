@@ -146,6 +146,12 @@ DIFFICULTY_TIERS: dict[str, int] = {
     "bw_deficit_push_up_bench": 3,  # hands-elevated deficit (easier variant, tier 3)
     # bw_single_leg_rdl: bodyweight single-leg hinge -> tier 3 (skill/balance demand)
     "bw_single_leg_rdl": 3,
+    # free-bar compound NOT tagged "barbell" — would slip the backstop and default to 2:
+    "tb_deadlift": 3,            # trap-bar deadlift — beginner-accessible loaded deadlift
+    # single-leg / unusual-pattern variants that fall through to tier 2 by default:
+    "kb_single_leg_rdl": 3,      # unilateral hinge, balance/skill demand
+    "db_walking_lunge": 3,       # standard loaded lunge (deliberate, not fallthrough)
+    "db_curtsy_lunge": 3,        # cross-behind lunge, balance demand
     # bw_inverted_row_feet_elevated: already in horizontal_pull ladder above (tier 5)
     # bb_upright_row: barbell but vertical_pull pattern (not isolation) -> needs >=4
     # covered by _default_tier barbell->4 IF the lunge trap doesn't apply (it doesn't for vertical_pull)
@@ -164,8 +170,9 @@ def _default_tier(e: dict) -> int:
     if pat == "lunge":
         name = e["name"].lower()
         return 3 if any(k in name for k in _LUNGE_HARDER) else 2
-    # compounds: a barbell variant ALWAYS requires proficiency -> >=4 (beginner safety)
-    if "barbell" in e["equipment_required"]:
+    # compounds on a FREE BAR (barbell/trap-bar/ez-bar) always require proficiency -> >=4
+    # (beginner safety backstop; trap_bar/ez_bar are NOT the literal "barbell" token):
+    if any(b in e["equipment_required"] for b in ("barbell", "trap_bar", "ez_bar")):
         return 4
     if e["equipment_required"] == ["bodyweight"]:
         return 3   # generic bodyweight compound (skill outliers are in DIFFICULTY_TIERS)
@@ -174,5 +181,5 @@ def _default_tier(e: dict) -> int:
 
 def get_exercise_db() -> List[Dict[str, Any]]:
     for e in EXPANDED_EXERCISES_DATA:
-        e["difficulty_tier"] = DIFFICULTY_TIERS.get(e["exercise_id"]) or _default_tier(e)
+        e["difficulty_tier"] = DIFFICULTY_TIERS.get(e["exercise_id"], _default_tier(e))
     return EXPANDED_EXERCISES_DATA

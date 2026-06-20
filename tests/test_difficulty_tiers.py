@@ -34,6 +34,15 @@ def test_every_barbell_compound_is_tier_4_or_5_safety():
         if "barbell" in e["equipment_required"] and e["movement_pattern"] != "isolation":
             assert e["difficulty_tier"] >= 4, f"{e['exercise_id']} barbell but tier {e['difficulty_tier']}"
 
+def test_no_free_bar_compound_reaches_a_beginner():
+    # Beginner ceiling is tier 2. NO loaded free-bar (barbell/trap_bar/ez_bar) compound may
+    # sit at tier <=2 — trap_bar/ez_bar are not the literal "barbell" token and slipped the backstop.
+    for e in get_exercise_db():
+        if e["movement_pattern"] == "isolation":
+            continue
+        if any(b in e["equipment_required"] for b in ("barbell", "trap_bar", "ez_bar")):
+            assert e["difficulty_tier"] >= 3, f"{e['exercise_id']} free-bar compound at tier {e['difficulty_tier']}"
+
 def test_known_hard_bodyweight_moves_are_tier_4_plus():
     db = {e["exercise_id"]: e for e in get_exercise_db()}
     for ex_id in ("bw_pull_up_pronated", "bw_weighted_pull_up", "bw_weighted_dip", "bw_deficit_push_up"):
