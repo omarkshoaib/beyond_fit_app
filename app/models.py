@@ -58,6 +58,8 @@ class ClientProfile(SQLModel, table=True):
     features: Optional[Dict] = Field(default=None, sa_column=Column(JSON))
     # Coach exercise substitution map: {original_exercise_id: replacement_exercise_id}
     coach_overrides: Optional[Dict] = Field(default=None, sa_column=Column(JSON))
+    # Per-family ability tiers from intake survey (SP-B1 C3); NULL -> coerced to experience default
+    exercise_ability: Optional[Dict] = Field(default=None, sa_column=Column(JSON))
     limitations_notes: Optional[str] = Field(default=None)
     safety_override_note: Optional[str] = Field(default=None)
     # ── Safety / health screening fields (Phase 1.7) ──────────────

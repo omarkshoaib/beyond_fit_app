@@ -52,3 +52,11 @@ def test_ladder_rung_none_when_no_equipment_valid_rung():
 def test_hinge_tier4_default_is_conventional_deadlift():
     # cross-family invariant: tier-4 hinge main = the conventional deadlift, not the RDL
     assert ab.ladder_rung("hinge", 4, ["full_gym"]) == "bb_deadlift_conventional"
+
+
+def test_clientprofile_has_exercise_ability_field():
+    from app.models import ClientProfile
+    p = ClientProfile(client_id="cl_x", exercise_ability={"squat": 3})
+    assert p.exercise_ability == {"squat": 3}
+    p2 = ClientProfile(client_id="cl_y")
+    assert p2.exercise_ability is None  # NULL-safe default
