@@ -39,3 +39,14 @@ async def test_ability_last_family_advances_to_limitations(mock_bot):
     nxt = await bot.handle_ability(make_callback_update(mock_bot, data="abil:2"), ctx)
     assert nxt == bot.ASK_LIMITATIONS
     assert len(ctx.user_data["exercise_ability"]) == len(bot._ABILITY_FAMILIES)
+
+
+@pytest.mark.asyncio
+async def test_back_into_ability_after_completion_does_not_crash(mock_bot):
+    # after the 6th answer ability_idx == 6; Back into ASK_ABILITY must clamp, not IndexError
+    from app import bot
+    ctx = make_context(mock_bot, {"experience_level": "beginner", "ability_idx": 6,
+                                  "exercise_ability": {f: 2 for f in bot._ABILITY_FAMILIES}})
+    upd = make_callback_update(mock_bot, data=f"intake_back:{bot.ASK_LIMITATIONS}")
+    nxt = await bot.handle_intake_back(upd, ctx)
+    assert nxt == bot.ASK_ABILITY  # re-prompts the last family, no crash

@@ -2273,7 +2273,9 @@ async def _render_intake_step(state, query, context: ContextTypes.DEFAULT_TYPE):
         await _prompt_experience(query.edit_message_text)
         return ASK_EXPERIENCE
     if state == ASK_ABILITY:
-        await _prompt_ability(query.edit_message_text, ud.get("ability_idx", 0))
+        # clamp: after the 6th answer ability_idx == len(families); re-prompt the last family
+        idx = min(ud.get("ability_idx", 0), len(_ABILITY_FAMILIES) - 1)
+        await _prompt_ability(query.edit_message_text, idx)
         return ASK_ABILITY
     if state == ASK_LIMITATIONS:
         await _prompt_limitations(query.edit_message_text, context)
@@ -5621,7 +5623,7 @@ def main():
         ],
         ASK_ABILITY: [
             CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
-            CallbackQueryHandler(handle_ability, pattern=r"^(abil:|abil_skip)"),
+            CallbackQueryHandler(handle_ability, pattern=r"^(abil:[123]|abil_skip)$"),
         ],
         ASK_LIMITATIONS: [
             CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
