@@ -1989,7 +1989,6 @@ async def handle_equipment_toggle(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def handle_equipment_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from app.domain.workout.equipment import floor_equipment
     query = update.callback_query
     await query.answer()
     selected = sorted(context.user_data.get("equip_selected", set()))

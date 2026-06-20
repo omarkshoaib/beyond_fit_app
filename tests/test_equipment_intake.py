@@ -58,3 +58,20 @@ async def test_custom_toggle_accumulates(mock_bot):
     await bot.handle_equipment_toggle(
         make_callback_update(mock_bot, data="equip_toggle_bench"), ctx)
     assert ctx.user_data["equip_selected"] == {"dumbbells", "bench"}
+
+
+@pytest.mark.asyncio
+async def test_pullup_no_sets_bodyweight_and_sends_new_message(mock_bot):
+    # the "No" branch edits the message with a warning, then sends the experience
+    # prompt as a NEW message (cannot edit the same callback twice).
+    from app import bot
+    ctx = make_context(mock_bot, {"avatar": "gen_pop", "days": 4})
+    upd = make_callback_update(mock_bot, data="equip_pullup:no")
+    nxt = await bot.handle_equipment_pullup(upd, ctx)
+    assert ctx.user_data["available_equipment"] == ["bodyweight"]
+    assert nxt == bot.ASK_EXPERIENCE
+    # conftest attaches a real CallbackQuery to mock_bot: edit_message_text routes to
+    # mock_bot.edit_message_text (the warning), message.reply_text to mock_bot.send_message
+    # (the experience prompt as a NEW message — proving no double-edit).
+    mock_bot.edit_message_text.assert_called_once()
+    mock_bot.send_message.assert_called_once()
