@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.4.0] — 2026-06-20 — SP-A: equipment-aware plans + intake back button
+
+First of four sub-projects (SP-A..D) from client-test feedback.
+See `docs/superpowers/plans/2026-06-20-spa-equipment-back-button.md`.
+
+### Added
+- Equipment survey at intake (preset menu + 15-item checklist + an explicit
+  pull-up-bar question on the bodyweight path), replacing the hardcoded `full_gym` —
+  non-gym clients no longer receive impossible exercises (C1).
+- `/update_profile` → Equipment to edit equipment after intake; unfreezes legacy
+  `full_gym` clients (C2).
+- Intake back navigation (forward-replay) so a wrong answer can be corrected mid-flow,
+  with idempotent confirm handlers (C3).
+- Bodyweight floor: `bw_air_squat`, `bw_reverse_lunge`, `bw_single_leg_rdl`,
+  `bw_knee_push_up`, `bw_inverted_row_bar` — a no-gym client now gets a complete
+  legs+push day (full 7/7 patterns with a pull-up bar) (C4).
+- Coach approval DM flags a no-pulling equipment gap (C5).
+- Equipment guard (`validate_equipment`) on all three plan-write paths: `/override`
+  set-time check, reject LLM-edit block, and a generation-write coach flag — each with
+  the reason + equipment-valid alternatives (C6).
+
+### Internal
+- New pure module `app/domain/workout/equipment.py` (vocabulary, presets, floor,
+  validator, alternatives, reachability). The generator treats an empty
+  `available_equipment` as `full_gym` (legacy-safe).
+
 ## [1.3.0] — 2026-06-13 — Usability + safety cluster
 
 Four independent deterministic slices wired into the coaching engine.

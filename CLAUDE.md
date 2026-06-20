@@ -118,6 +118,25 @@ A single large in-memory list of exercise dicts (`EXPANDED_EXERCISES_DATA`). Eac
   non-blocking and surfaced in the plan `rationale` ("[macro drift]") for the coach.
   The fat check is grounded in the AMDR (fat ≤ 35% of energy), not a tight band around
   the design target.
+- Equipment is collected at intake (preset menu + 15-item checklist + an explicit
+  pull-up-bar question on the bodyweight path) and editable via `/update_profile` →
+  Equipment, replacing the old hardcoded `["full_gym"]`. The pure module
+  `app/domain/workout/equipment.py` holds the vocabulary, presets, `floor_equipment`
+  (an empty selection floors to `["bodyweight"]` — an empty list would make the
+  generator emit a zero-exercise plan), and `validate_equipment`/`equipment_alternatives`.
+  A legacy/empty `available_equipment` row is treated as `full_gym` at generation
+  (`_filter_exercises`). Intake supports **back navigation** (forward-replay: Back one
+  step, re-tap forward; `handle_intake_back` + `_intake_predecessor`); confirm handlers
+  are idempotent so replay never leaves stale flags.
+- Coach exercise-adds are equipment-guarded by `validate_equipment` on all three
+  `PendingApproval.workout_json` write paths: `/override` is checked at set-time (reject
+  + alternatives), the reject LLM-edit is blocked before it can overwrite a plan, and the
+  initial-generation write flags a mismatch on the coach DM. Add-core
+  (`_core_choices_for_client`) was already equipment-filtered. A bodyweight-only client
+  with no pull-up bar can train no pulling pattern — the coach approval DM flags this.
+  Bodyweight floor exercises: `bw_air_squat`, `bw_reverse_lunge`, `bw_single_leg_rdl`,
+  `bw_knee_push_up`, `bw_inverted_row_bar` (no regression metadata — that is SP-B). See
+  `docs/superpowers/specs/2026-06-20-spa-equipment-back-button-design.md`.
 
 ## Environment variables
 
