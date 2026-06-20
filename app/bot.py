@@ -4437,14 +4437,21 @@ async def handle_admin_feedback(update: Update, context: ContextTypes.DEFAULT_TY
             _violations = validate_equipment(new_workout, _feedback_client.available_equipment)
             if _violations:
                 v = _violations[0]
-                alts = equipment_alternatives(v.exercise_id, _feedback_client.available_equipment)
-                alt_txt = "\n".join(f"• {a['name']} (`{a['exercise_id']}`)" for a in alts) or "(none in DB)"
-                await update.message.reply_text(
-                    f"🚫 That edit added *{v.exercise_name}*, which needs "
-                    f"*{', '.join(v.missing)}* — the client doesn't have it. "
-                    f"Plan NOT changed.\n\nEquipment-valid alternatives:\n{alt_txt}",
-                    parse_mode="Markdown",
-                )
+                if v.missing == ["<unknown exercise>"]:
+                    await update.message.reply_text(
+                        f"🚫 `{v.exercise_id}` isn't a recognized exercise in our database — "
+                        f"I can't add it. Plan NOT changed.",
+                        parse_mode="Markdown",
+                    )
+                else:
+                    alts = equipment_alternatives(v.exercise_id, _feedback_client.available_equipment)
+                    alt_txt = "\n".join(f"• {a['name']} (`{a['exercise_id']}`)" for a in alts) or "(none in DB)"
+                    await update.message.reply_text(
+                        f"🚫 This plan contains *{v.exercise_name}*, which needs "
+                        f"*{', '.join(v.missing)}* — the client doesn't have it. "
+                        f"Plan NOT changed.\n\nEquipment-valid alternatives:\n{alt_txt}",
+                        parse_mode="Markdown",
+                    )
                 return ConversationHandler.END
             new_msg = llm.generate_coaching_message(_feedback_client, new_workout)
 
@@ -5344,6 +5351,13 @@ async def handle_override(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                                exercise_name=to_id, sets=1, reps="1", rpe=1)],
             total_fatigue=1)])
         bad = validate_equipment(probe, profile.available_equipment)
+        if bad and bad[0].missing == ["<unknown exercise>"]:
+            await update.message.reply_text(
+                f"🚫 Can't set that override: `{to_id}` isn't a recognized exercise "
+                f"in our database.",
+                parse_mode="Markdown",
+            )
+            return
         if bad:
             missing = ", ".join(bad[0].missing)
             alts = equipment_alternatives(to_id, profile.available_equipment)

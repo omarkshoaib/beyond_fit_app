@@ -42,6 +42,30 @@ async def test_override_to_unavailable_equipment_is_rejected(monkeypatch):
     assert "barbell" in sent or "squat_rack" in sent
 
 
+@pytest.mark.asyncio
+async def test_override_to_unknown_exercise_is_rejected(monkeypatch):
+    from app import bot
+    monkeypatch.setattr(bot.auth_roles, "is_coach", lambda uid: True)
+    monkeypatch.setattr(bot.auth_roles, "is_super_admin", lambda uid: False)
+    cid = "cl_guard_unknown"
+    with Session(bot.engine) as s:
+        s.merge(ClientProfile(client_id=cid, avatar="gen_pop", training_days=3,
+                              experience_level="beginner", limitations=[],
+                              available_equipment=["full_gym"], assigned_coach_id=999))
+        s.commit()
+    mock_bot = AsyncMock()
+    ctx = make_context(mock_bot)
+    ctx.args = [cid, "bw_air_squat", "totally_made_up_id"]
+    upd = make_text_update(mock_bot, user_id=999, text="/override")
+    await bot.handle_override(upd, ctx)
+    with Session(bot.engine) as s:
+        p = s.get(ClientProfile, cid)
+    assert not (p.coach_overrides or {}).get("bw_air_squat")  # NOT stored
+    sent = " ".join(str(c.kwargs.get("text", "")) + str(c.args)
+                    for c in mock_bot.send_message.call_args_list)
+    assert "recognized exercise" in sent and "<unknown exercise>" not in sent
+
+
 def test_validate_then_persist_blocks_bad_week():
     from app.domain.workout import equipment as eq
     slot = WorkoutSlot(slot_order=0, slot_type="main_compound",
