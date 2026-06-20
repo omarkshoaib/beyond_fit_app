@@ -84,7 +84,8 @@ generation (generator.py)
 
 coach review (bot.py + new validator)
   └─ [C6] validate_equipment(week, available_equipment)
-         single choke point pre-PendingApproval + /override set-time check
+         one validate_then_persist helper on ALL 3 PendingApproval write sites
+         + /override set-time check
 ```
 
 ---
@@ -170,20 +171,28 @@ Skip button co-existing with a `MessageHandler` works, `bot.py:5223-5231`.)
 mis-navigates. `_intake_back(context)` derives the previous state from
 `context.user_data` (e.g. `_ask_limitations_other` flag, which preset was tapped).
 
-**Per-state key clearing (not just "the answer").** On back-out, the state being
-*left* must clear its stored value **and any derived flags**, so re-answering is clean:
+**Forward-replay model (v1).** Back moves to the previous step **only**; the client then
+re-taps forward through the (pre-filled) remaining steps. This is the simple, robust v1 —
+**not** a state-stack. Two invariants make it correct, and they replace any blanket
+"clear the answer" logic (which would wipe the very selections we want to show):
 
-| Leaving state | Keys cleared from `user_data` |
-|---|---|
-| `ASK_DAYS` | `days` |
-| `ASK_EQUIPMENT` / `_CUSTOM` | `available_equipment`, `equip_selected`, `equip_preset` |
-| `ASK_EXPERIENCE` | `experience_level` |
-| `ASK_LIMITATIONS` | `selected_limitations`, `limitations`, `_ask_limitations_other` |
-| `ASK_LIMITATIONS_OTHER` | `limitations_other` (+ re-enter LIMITATIONS with prior toggles intact) |
-| `ASK_BASE_SQUAT/BENCH/DEADLIFT` | the corresponding `*_e1rm` (the existing `is not None` seed guard already tolerates partials) |
+1. **Committed answers are preserved, not cleared.** Re-entering a step re-seeds its
+   editable view from the committed value: a multi-select step (`ASK_LIMITATIONS`,
+   `ASK_EQUIPMENT_CUSTOM`) re-renders with prior toggles still checked; a single-choice
+   step shows its prior pick. The client edits rather than restarts.
+2. **Confirm handlers are idempotent on replay.** Each step's confirm handler **always**
+   (re)writes its committed answer *and* recomputes any derived routing flag every time it
+   runs, so a second pass never leaves stale derived state. Concretely:
+   `handle_limitations_confirm` must **always** set `_ask_limitations_other` to True/False
+   (not only when True) and clear `limitations_other` when "other" is deselected; the
+   equipment confirm must always (re)write `available_equipment` from the current toggles
+   (floored, never `[]`); the `ASK_BASE_*` handlers already tolerate replay via the
+   existing `is not None` seed guard.
 
-Re-rendering a multi-select step (`ASK_LIMITATIONS`, `ASK_EQUIPMENT_CUSTOM`) shows the
-prior toggles still checked so the client edits rather than restarts.
+So there is **no** separate per-state clearing table — preservation + idempotent replay is
+the model. The one thing the implementer must guarantee is invariant #2 for the two states
+with derived/conditional routing (limitations-other and the equipment preset→custom
+branch); everything else is naturally overwritten on the forward pass.
 
 ## C4 — Bodyweight floor (exercise DB)
 
@@ -238,27 +247,37 @@ equipment gaps, so nothing backfills it. This is an explicit constraint, not a "
    `available_equipment` vs the patterns the generated week actually contains.)
 3. Full band support + improvised pulling regressions are **SP-B**.
 
-## C6 — Coach-edit equipment guard (single choke point)
+## C6 — Coach-edit equipment guard (one validator, every write site)
 
 There are **three** ways a coach introduces an exercise; the guard must cover all:
 
 | Path | Today | Fix |
 |---|---|---|
-| `apply_coach_edits` (free-text reject → LLM) | no equipment check | choke point below |
-| `/override` → `coach_overrides` → `_apply_override` (generation time) | DB-existence only | **set-time check** + choke point |
-| Add-core (`_core_choices_for_client`, `bot.py:4420-4434`) | already equipment-filtered | **no change** (note it's safe) |
+| `apply_coach_edits` (free-text reject → LLM) | no equipment check | validate at re-present write |
+| `/override` → `coach_overrides` → `_apply_override` (generation time) | DB-existence only | **set-time check** + generation-write validation |
+| Add-core (`_core_choices_for_client`, `bot.py:4420-4434`) | already equipment-filtered | **no change** (note it's safe; defensive validation only) |
 
 **New validator** `validate_equipment(week, available_equipment) -> list[Violation]`:
 for each slot, resolve `slot.exercise_id` (the stable DB key, `models.py:254`) to its
 exercise; flag if any `equipment_required` token is absent and `full_gym` is not present;
 an exercise id **not in the DB** is also a violation.
 
-**Choke point:** call `validate_equipment` on the whole `WorkoutWeek` **immediately
-before it is written to `PendingApproval` / dispatched**, so it catches plain generation
-(defensive), `coach_overrides`, and `apply_coach_edits` uniformly. On any violation: do
-**not** overwrite/persist the plan; DM the coach a one-shot message — the offending
-exercise(s), the missing gear, and a short list of **equipment-valid, same-muscle/pattern
-alternatives** (via `_filter_exercises`). The coach re-instructs or picks. (Stays a
+**Convergence: there is NO single existing choke point** — `PendingApproval.workout_json`
+is written at **three** independent sites (verified): initial generation
+(`run_generation_and_dispatch`, `bot.py:519-523`), the post-LLM-edit reject re-present
+(`bot.py:4166`), and post-add-core (`bot.py:4567`). The fix **creates** one: introduce a
+single `validate_then_persist_pending(...)` helper that runs `validate_equipment` and only
+then writes `workout_json`, and **route all three write sites through it**. This makes the
+guard a real single choke point by refactor rather than by assumption.
+- Site `:519-523` carries `coach_overrides` violations (overrides are applied during
+  generation) → caught here.
+- Site `:4166` is the LLM-edit path → the main newly-covered hole.
+- Site `:4567` (add-core) is already equipment-safe → validation is defensive only.
+
+On any violation: do **not** persist the plan; DM the coach a one-shot message — the
+offending exercise(s), the missing gear, and a short list of **equipment-valid,
+same-muscle/pattern alternatives** (via `_filter_exercises`). The coach re-instructs or
+picks. (Stays a
 single informational DM — not a thread; that is SP-C.)
 
 **`/override` set-time check:** in `handle_override` (`bot.py:5053-5058`), before storing
@@ -298,20 +317,29 @@ field — that is SP-B).
   Done-with-empty floors to `["bodyweight"]` (not `[]`); a new intake persists the
   surveyed value, **not** `["full_gym"]`; the engine produces a non-empty plan for each
   preset.
+- **C1 end-to-end (the headline-bug guarantee).** This is the property the whole slice
+  exists for. For a **dumbbell-only** client and a **bodyweight + pull-up-bar** client,
+  generate a *full* plan and assert **every** slot's `exercise_id` resolves to an exercise
+  whose `equipment_required` is satisfied by the client's `available_equipment` — i.e. a
+  non-full-gym client never receives a barbell/leg-press exercise. (Exercises C1 + the
+  existing `_filter_exercises` together, end-to-end, not the validator in isolation.)
 - **C2:** `UPD_EQUIPMENT` round-trips — an existing `full_gym` client edits to a home set
   and the next plan respects it.
 - **C3:** from each post-first state, Back re-enters the *correct* computed predecessor
-  with prior selections intact; the "other"-branch and equipment-preset branch both
-  navigate correctly; backing out of a step clears its derived flags (re-answering
-  limitations after a back does not leak a stale `selected_limitations`).
+  with prior selections preserved (multi-select toggles still checked); the "other"-branch
+  and equipment-preset branch both navigate correctly; **idempotent replay** — going back,
+  *deselecting* "other", then forward again leaves `_ask_limitations_other = False` and no
+  stale `limitations_other` (the confirm handler always rewrites the flag), and re-running
+  the equipment confirm never yields `[]`.
 - **C4:** a `["bodyweight"]` client gets a complete squat+hinge+lunge+push day with **no
   collapsed slot**; the 5 new ids exist and validate against the `Exercise` schema.
 - **C5:** a `["bodyweight"]` (no-bar) client's plan carries the `[equipment gap]` coach
   flag; a `["bodyweight","pull_up_bar"]` client trains all 7 patterns with **no** flag.
 - **C6:** `validate_equipment` flags a slot needing absent equipment and passes a valid
   week; a `coach_overrides` pointing at an unavailable-equipment exercise is caught at
-  the choke point (and rejected at `/override` set-time) with alternatives returned;
-  Add-core remains valid; an unknown exercise id is flagged.
+  the generation write (and rejected at `/override` set-time) with alternatives returned;
+  an LLM-edited week with a bad-equipment exercise is caught at the reject re-present
+  write; Add-core remains valid; an unknown exercise id is flagged.
 
 ---
 
