@@ -2901,21 +2901,12 @@ async def start_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
     if main_slots:
         # Structured mode: iterate per exercise
-        context.user_data["checkin_structured_slots"] = [
-            {"day": d, "exercise_id": s.exercise_id, "exercise_name": s.exercise_name, "rpe": s.rpe}
-            for d, s in main_slots
-        ]
+        context.user_data["checkin_structured_slots"] = _checkin_slot_dicts(main_slots)
         context.user_data["checkin_current_slot_idx"] = 0
         context.user_data["checkin_structured_results"] = {}
 
         first = context.user_data["checkin_structured_slots"][0]
-        await update.message.reply_text(
-            f"📋 *Week {week.week_number} Check-in*\n\n"
-            f"Let's log your main lifts one by one.\n\n"
-            f"*{first['exercise_name']}* ({first['day']}) — what was your top-set weight? (kg, e.g. `100`)",
-            parse_mode="Markdown",
-        )
-        return CHECKIN_EX_WEIGHT
+        return await _prompt_checkin_slot(update.message.reply_text, first, week.week_number)
 
     # If all main slots were already logged, go straight to general notes
     if all_main_slots and not main_slots:
@@ -2965,12 +2956,7 @@ async def handle_checkin_resume(update: Update, context: ContextTypes.DEFAULT_TY
     slots = context.user_data.get("checkin_structured_slots", [])
     if idx < len(slots):
         slot = slots[idx]
-        await query.edit_message_text(
-            f"Resuming — *{slot['exercise_name']}* ({slot['day']}) — "
-            "what was your top-set weight? (kg)",
-            parse_mode="Markdown",
-        )
-        return CHECKIN_EX_WEIGHT
+        return await _prompt_checkin_slot(query.edit_message_text, slot)
 
     await query.edit_message_text("All lifts already logged. Any final notes? (or /skip)")
     return CHECKIN_GENERAL
@@ -3128,11 +3114,7 @@ async def handle_structured_sets(update: Update, context: ContextTypes.DEFAULT_T
 
     next_slot = _structured_advance(context)
     if next_slot:
-        await query.edit_message_text(
-            f"*{next_slot['exercise_name']}* ({next_slot['day']}) — what was your top-set weight? (kg)",
-            parse_mode="Markdown",
-        )
-        return CHECKIN_EX_WEIGHT
+        return await _prompt_checkin_slot(query.edit_message_text, next_slot)
 
     await query.edit_message_text(
         "Almost done! Any other notes — sleep, energy, life stress, or anything else "
@@ -4294,6 +4276,27 @@ def _select_checkin_slots(week: WorkoutWeek) -> list[tuple[str, WorkoutSlot]]:
         for slot in day.slots
         if slot.slot_type == "main_compound"
     ]
+
+
+def _checkin_slot_dicts(main_slots) -> list[dict]:
+    """Build the structured check-in slot dicts; flag bodyweight mains (no external load)."""
+    return [
+        {"day": d, "exercise_id": s.exercise_id, "exercise_name": s.exercise_name,
+         "rpe": s.rpe, "bodyweight": s.target_weight is None}
+        for d, s in main_slots
+    ]
+
+
+async def _prompt_checkin_slot(send, slot: dict, week_number: int = None) -> int:
+    """Ask weight for a loaded slot, or RPE for a bodyweight slot. Returns the next state."""
+    head = f"📋 *Week {week_number} Check-in*\n\n" if week_number is not None else ""
+    if slot.get("bodyweight"):
+        await send(f"{head}*{slot['exercise_name']}* ({slot['day']}) — what RPE was your top set? "
+                   "(1–10)", parse_mode="Markdown")
+        return CHECKIN_EX_RPE
+    await send(f"{head}*{slot['exercise_name']}* ({slot['day']}) — what was your top-set weight? "
+               "(kg, e.g. `100`)", parse_mode="Markdown")
+    return CHECKIN_EX_WEIGHT
 
 
 def _format_plan_summary(workout: WorkoutWeek) -> str:
