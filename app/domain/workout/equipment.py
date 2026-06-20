@@ -6,6 +6,8 @@ wildcard meaning "has everything". The checklist is the remaining real tokens.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 # The 15 client-facing checklist tokens (bodyweight is implicit; full_gym is the
 # wildcard preset). Grouped roughly free-weights -> machines -> calisthenics stations;
 # the niche barbell attachments (ez_bar, trap_bar, landmine) are included so a Custom
@@ -33,9 +35,6 @@ def floor_equipment(tokens: "list[str] | None") -> list[str]:
     return list(tokens) if tokens else ["bodyweight"]
 
 
-from dataclasses import dataclass
-
-
 @dataclass
 class Violation:
     exercise_id: str
@@ -49,7 +48,12 @@ def _has_all(required: "list[str]", available: "set[str]") -> bool:
 
 def validate_equipment(week, available_equipment: "list[str] | None") -> list[Violation]:
     """Every slot's exercise must be satisfiable by the client's equipment.
-    An exercise id not in the DB is also a violation (cannot verify it)."""
+    An exercise id not in the DB is also a violation (cannot verify it).
+
+    NOTE the empty-list asymmetry vs ``floor_equipment``: here an empty/None
+    ``available_equipment`` is treated as a wildcard (legacy-safe — a pre-survey
+    client with no recorded equipment must not be flagged), whereas the intake
+    floors an empty selection to ``["bodyweight"]``."""
     from app.exercise_db import get_exercise_db
     db = {e["exercise_id"]: e for e in get_exercise_db()}
     avail = set(available_equipment or ["full_gym"])  # empty -> wildcard (legacy-safe)

@@ -1,4 +1,7 @@
 from app.domain.workout import equipment as eq
+from app.exercise_db import get_exercise_db
+from app.models import ClientProfile, WorkoutWeek, WorkoutDay, WorkoutSlot
+from app.generator import WorkoutGenerator
 
 
 def test_presets_map_to_tokens():
@@ -11,7 +14,6 @@ def test_presets_map_to_tokens():
 def test_checklist_excludes_bodyweight_and_full_gym():
     assert "bodyweight" not in eq.CHECKLIST_TOKENS
     assert "full_gym" not in eq.CHECKLIST_TOKENS
-    from app.exercise_db import get_exercise_db
     real = {t for e in get_exercise_db() for t in e["equipment_required"]}
     assert set(eq.CHECKLIST_TOKENS) <= real
 
@@ -21,9 +23,6 @@ def test_floor_never_empty():
     assert eq.floor_equipment(None) == ["bodyweight"]
     assert eq.floor_equipment(["dumbbells"]) == ["dumbbells"]
 
-
-from app.models import ClientProfile, WorkoutWeek, WorkoutDay, WorkoutSlot
-from app.generator import WorkoutGenerator
 
 def _week_with(ex_id: str) -> WorkoutWeek:
     slot = WorkoutSlot(slot_order=0, slot_type="main_compound", exercise_id=ex_id,
