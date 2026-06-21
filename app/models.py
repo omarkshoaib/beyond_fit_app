@@ -355,3 +355,17 @@ class ReminderLog(SQLModel, table=True):
     subscription_id: int = Field(index=True, foreign_key="subscription.id")
     kind: str  # "d7" | "d3" | "d1" | "expired"
     sent_at: datetime
+
+
+class ClientQuestion(SQLModel, table=True):
+    """A one-shot client→coach question with an LLM draft and the coach's answer (SP-C)."""
+    question_id: str = Field(primary_key=True)
+    client_id: str = Field(index=True)
+    client_chat_id: int = Field(sa_column=Column(BigInteger))
+    coach_recipient_id: int = Field(sa_column=Column(BigInteger))
+    question_text: str
+    draft_answer: Optional[str] = Field(default=None)
+    final_answer: Optional[str] = Field(default=None)
+    status: str = Field(default="pending")   # pending | answered | dismissed
+    created_at: datetime
+    answered_at: Optional[datetime] = Field(default=None)
