@@ -2,6 +2,11 @@
 """SP-C client↔coach Q&A."""
 from datetime import datetime, timezone
 
+# Module-level import so SQLModel.metadata is populated (clientquestion + the seed models)
+# before the autouse test-engine fixture calls create_all — required for isolated runs.
+from app import bot  # noqa: F401
+from app.models import ClientQuestion, ClientProfile, ChatBinding, CoachProfile  # noqa: F401
+
 
 def test_client_question_model_roundtrips():
     from app.models import ClientQuestion
