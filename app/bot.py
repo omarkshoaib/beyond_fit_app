@@ -5478,6 +5478,98 @@ async def handle_qa_question(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ConversationHandler.END
 
 
+# ── Coach Q&A answer flow: Send / Edit / Dismiss + client delivery (SP-C Task 4) ──
+
+async def _deliver_qa_answer(bot, q, text: str) -> bool:
+    """DM the client their coach's answer (or dismissal note). Returns False if unreachable."""
+    chat_id = auth_roles.resolve_primary_chat_id(q.client_id)
+    if chat_id is None:
+        return False
+    await bot.send_message(chat_id=chat_id, text=text)
+    return True
+
+
+def _load_question_for_coach(qid: str, coach_user_id: int):
+    """Load a ClientQuestion if the coach may act on its client; else None + reason."""
+    with Session(engine, expire_on_commit=False) as session:
+        q = session.get(ClientQuestion, qid)
+    if q is None:
+        return None, "❌ Question no longer exists."
+    if not _user_can_act_on_client(coach_user_id, q.client_id):
+        return None, "🔒 Not authorized for this client."
+    if q.status != "pending":
+        return None, "Already handled."
+    return q, None
+
+
+async def _finalise_qa(q, final_answer: str, deliver_text: str, status: str, context) -> None:
+    from datetime import datetime, timezone
+    with Session(engine) as session:
+        row = session.get(ClientQuestion, q.question_id)
+        row.final_answer = final_answer
+        row.status = status
+        row.answered_at = datetime.now(timezone.utc)
+        session.add(row); session.commit()
+    delivered = await _deliver_qa_answer(context.bot, q, deliver_text)
+    if not delivered:
+        await context.bot.send_message(chat_id=q.coach_recipient_id,
+                                       text="⚠️ Couldn't deliver — the client has no linked chat.")
+
+
+async def handle_qa_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    qid = query.data.split(":", 1)[1]
+    q, err = _load_question_for_coach(qid, update.effective_user.id)
+    if q is None:
+        await query.edit_message_text(err); return
+    if not q.draft_answer:
+        await query.answer("No draft — use ✏️ Edit & send.", show_alert=True); return
+    await _finalise_qa(q, q.draft_answer, f"💬 Your coach replied:\n\n{q.draft_answer}", "answered", context)
+    await query.edit_message_text("✅ Sent to the client.")
+
+
+async def handle_qa_dismiss(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    qid = query.data.split(":", 1)[1]
+    q, err = _load_question_for_coach(qid, update.effective_user.id)
+    if q is None:
+        await query.edit_message_text(err); return
+    await _finalise_qa(q, None,
+                       "💬 Your coach reviewed your question — no further action needed. Ask anytime with /ask.",
+                       "dismissed", context)
+    await query.edit_message_text("Dismissed (client notified).")
+
+
+async def handle_qa_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    qid = query.data.split(":", 1)[1]
+    q, err = _load_question_for_coach(qid, update.effective_user.id)
+    if q is None:
+        await query.edit_message_text(err)
+        return ConversationHandler.END
+    context.user_data["qa_question_id"] = qid
+    await query.edit_message_text("Type your answer to send to the client:")
+    return QA_COACH_ANSWER
+
+
+async def handle_qa_coach_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    qid = context.user_data.pop("qa_question_id", None)
+    answer = (update.message.text or "").strip()
+    if not qid:
+        await update.message.reply_text("Lost track of the question — please tap Edit again.")
+        return ConversationHandler.END
+    q, err = _load_question_for_coach(qid, update.effective_user.id)
+    if q is None:
+        await update.message.reply_text(err)
+        return ConversationHandler.END
+    await _finalise_qa(q, answer, f"💬 Your coach replied:\n\n{answer}", "answered", context)
+    await update.message.reply_text("✅ Sent to the client.")
+    return ConversationHandler.END
+
+
 # ── /override COMMAND — coach exercise substitution ────────────────────────────
 
 async def handle_override(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -5908,15 +6000,17 @@ def main():
         per_message=False,
     ))
 
-    # ── Admin: workout reject + form-check tip editing ──
+    # ── Admin: workout reject + form-check tip editing + coach Q&A answer (SP-C) ──
     app.add_handler(ConversationHandler(
         entry_points=[
             CallbackQueryHandler(handle_admin_reject, pattern=r"^reject:"),
             CallbackQueryHandler(handle_fc_edit, pattern=r"^fc_edit_"),
+            CallbackQueryHandler(handle_qa_edit, pattern=r"^qa_edit:"),
         ],
         states={
             ADMIN_FEEDBACK: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_feedback)],
             FORMCHECK_TIPS_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_fc_tip_edit)],
+            QA_COACH_ANSWER: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_qa_coach_answer)],
         },
         fallbacks=[CommandHandler("cancel", cancel_admin)],
         per_message=False,
@@ -6034,6 +6128,8 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_nutrition_approve, pattern=r"^nutrapprove:"))
     app.add_handler(CallbackQueryHandler(handle_nutrition_discard, pattern=r"^nutrdiscard:"))
     app.add_handler(CallbackQueryHandler(handle_plan_ack, pattern=r"^ack_(good|ok)$"))
+    app.add_handler(CallbackQueryHandler(handle_qa_send, pattern=r"^qa_send:"))
+    app.add_handler(CallbackQueryHandler(handle_qa_dismiss, pattern=r"^qa_dismiss:"))
     app.add_handler(CallbackQueryHandler(handle_review_toggle, pattern=r"^review_toggle_batch$"))
     app.add_handler(CallbackQueryHandler(handle_override_remove, pattern=r"^override_remove:"))
     app.add_handler(CallbackQueryHandler(handle_safety_clear, pattern=r"^safety_clear:"))

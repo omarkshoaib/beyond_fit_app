@@ -88,3 +88,63 @@ async def test_ask_cap_refuses_fourth_pending(mock_bot, monkeypatch):
         n = len(s.exec(select(ClientQuestion).where(ClientQuestion.client_id == cid)).all())
     assert n == 3  # not inserted
     assert nxt == bot.ConversationHandler.END
+
+
+def _seed_question(qid="q_ans", cid="cl_ans", coach_id=999, chat_id=5252, draft="draft A", status="pending"):
+    from app import bot
+    from app.models import ClientProfile, ChatBinding, CoachProfile, ClientQuestion
+    from datetime import datetime, timezone
+    with Session(bot.engine) as s:
+        s.merge(ClientProfile(client_id=cid, avatar="gen_pop", training_days=3,
+                              experience_level="beginner", limitations=[], available_equipment=["full_gym"],
+                              assigned_coach_id=coach_id))
+        s.merge(CoachProfile(telegram_user_id=coach_id, name="C", email="c@x.co", mobile="0",
+                             specialty="s", years_experience=1, certifications="none", status="approved"))
+        s.merge(ChatBinding(chat_id=chat_id, client_id=cid, is_primary=True))
+        s.merge(ClientQuestion(question_id=qid, client_id=cid, client_chat_id=chat_id,
+                               coach_recipient_id=coach_id, question_text="q?", draft_answer=draft,
+                               status=status, created_at=datetime.now(timezone.utc)))
+        s.commit()
+    return qid, cid, coach_id, chat_id
+
+
+@pytest.mark.asyncio
+async def test_qa_send_delivers_draft_to_client(mock_bot):
+    from app import bot
+    from app.models import ClientQuestion
+    qid, cid, coach_id, chat_id = _seed_question()
+    ctx = make_context(mock_bot)
+    await bot.handle_qa_send(make_callback_update(mock_bot, user_id=coach_id, data=f"qa_send:{qid}"), ctx)
+    with Session(bot.engine) as s:
+        q = s.get(ClientQuestion, qid)
+    assert q.status == "answered" and q.final_answer == "draft A"
+    targets = [c.kwargs.get("chat_id") for c in mock_bot.send_message.call_args_list]
+    assert chat_id in targets  # client got the answer
+
+
+@pytest.mark.asyncio
+async def test_qa_edit_then_typed_answer_binds_to_question(mock_bot):
+    from app import bot
+    from app.models import ClientQuestion
+    qid, cid, coach_id, chat_id = _seed_question(qid="q_edit", cid="cl_edit", chat_id=5353)
+    ctx = make_context(mock_bot)
+    st = await bot.handle_qa_edit(make_callback_update(mock_bot, user_id=coach_id, data=f"qa_edit:{qid}"), ctx)
+    assert st == bot.QA_COACH_ANSWER and ctx.user_data["qa_question_id"] == qid
+    await bot.handle_qa_coach_answer(make_text_update(mock_bot, user_id=coach_id, text="My real answer."), ctx)
+    with Session(bot.engine) as s:
+        q = s.get(ClientQuestion, qid)
+    assert q.status == "answered" and q.final_answer == "My real answer."
+
+
+@pytest.mark.asyncio
+async def test_qa_dismiss_notifies_client(mock_bot):
+    from app import bot
+    from app.models import ClientQuestion
+    qid, cid, coach_id, chat_id = _seed_question(qid="q_dis", cid="cl_dis", chat_id=5454)
+    ctx = make_context(mock_bot)
+    await bot.handle_qa_dismiss(make_callback_update(mock_bot, user_id=coach_id, data=f"qa_dismiss:{qid}"), ctx)
+    with Session(bot.engine) as s:
+        q = s.get(ClientQuestion, qid)
+    assert q.status == "dismissed"
+    targets = [c.kwargs.get("chat_id") for c in mock_bot.send_message.call_args_list]
+    assert chat_id in targets  # client still hears back
