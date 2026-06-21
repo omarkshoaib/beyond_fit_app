@@ -36,7 +36,7 @@ from datetime import datetime, timedelta, timezone
 from app.models import (
     ClientProfile, WorkoutWeek, WorkoutSlot, PendingApproval, WorkoutHistory, ProfileSnapshot,
     NutritionProfile, NutritionPlan, CheckIn,
-    AccessCode, Payment, Subscription, ChatBinding, CoachProfile,
+    AccessCode, Payment, Subscription, ChatBinding, CoachProfile, ClientQuestion,
 )
 from app.database import engine, create_db_and_tables
 from app.auth import roles as auth_roles
@@ -240,6 +240,12 @@ FORMCHECK_TIPS_CONFIRM = 101
     "COACH_APPLY_CV", "COACH_APPLY_PORTFOLIO", "COACH_REJECT_REASON",
 ]
 
+
+# ── Client Q&A states + caps (SP-C) ──────────────────────────────────────────
+ASK_QA_QUESTION = "ASK_QA_QUESTION"
+QA_COACH_ANSWER = "QA_COACH_ANSWER"
+_QA_MAX_PENDING = 3
+_QA_MAX_LEN = 1000
 
 # ── FAQ rate limiter (5 questions / chat / hour) ───────────────────────────────
 # Maps chat_id → list of monotonic timestamps within the rolling window.
@@ -5365,12 +5371,111 @@ async def handle_plan_ack(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await query.answer()
 
     if query.data == "ack_question":
+        # Dead-end branch — now handled by the /ask ConversationHandler entry point.
+        # Kept for safety but should never be reached after the pattern change.
         await query.edit_message_text(
             "Feel free to ask your question anytime — your coach will reply here."
         )
     else:
         label = "Great!" if query.data == "ack_good" else "Noted — keep going!"
         await query.edit_message_text(label)
+
+
+# ── /ask client question flow (SP-C) ─────────────────────────────────────────
+
+def _qa_coach_keyboard(qid: str, has_draft: bool) -> InlineKeyboardMarkup:
+    rows = []
+    if has_draft:
+        rows.append([InlineKeyboardButton("✅ Send draft", callback_data=f"qa_send:{qid}")])
+    rows.append([InlineKeyboardButton("✏️ Edit & send", callback_data=f"qa_edit:{qid}")])
+    rows.append([InlineKeyboardButton("❌ Dismiss", callback_data=f"qa_dismiss:{qid}")])
+    return InlineKeyboardMarkup(rows)
+
+
+async def _dm_coach_question(bot, q) -> None:
+    """Send the coach the question + client background + the DRAFT, with action buttons."""
+    summary = _build_client_summary(q.client_id)
+    draft = q.draft_answer or "[draft unavailable — please answer manually]"
+    text = (
+        f"💬 *New question from your client*\n\n{summary}\n\n"
+        f"*Their question:*\n{q.question_text}\n\n"
+        f"*Suggested draft — ⚠️ DRAFT, review before sending:*\n{draft}"
+    )
+    await safe_send_markdown(bot, q.coach_recipient_id, text,
+                             reply_markup=_qa_coach_keyboard(q.question_id, bool(q.draft_answer)))
+
+
+@auth_roles.requires_active_sub
+async def start_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    """Entry for /ask AND the rewired 'Question' button."""
+    if update.callback_query is not None:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text("What's your question for your coach? (one message)")
+    else:
+        await update.message.reply_text("What's your question for your coach? (one message)")
+    return ASK_QA_QUESTION
+
+
+async def handle_qa_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    import uuid
+    from datetime import datetime, timezone
+    chat_id = update.effective_chat.id
+    client = auth_roles.get_authenticated_client(chat_id)
+    if client is None:
+        await update.message.reply_text("Your chat isn't linked. Tap /start to log in.")
+        return ConversationHandler.END
+    cid = client.client_id
+
+    with Session(engine) as session:
+        pending = session.exec(
+            select(ClientQuestion).where(ClientQuestion.client_id == cid,
+                                         ClientQuestion.status == "pending")
+        ).all()
+    if len(pending) >= _QA_MAX_PENDING:
+        await update.message.reply_text(
+            f"You have {_QA_MAX_PENDING} questions awaiting your coach — please wait for a reply "
+            "before asking more.")
+        return ConversationHandler.END
+
+    question_text = (update.message.text or "").strip()[:_QA_MAX_LEN]
+    if not question_text:
+        await update.message.reply_text("Please type your question.")
+        return ASK_QA_QUESTION
+
+    coach_id = _resolve_review_recipient(cid)
+    if coach_id is None:
+        await update.message.reply_text("No coach is available right now — please try again later.")
+        return ConversationHandler.END
+
+    # latest active plan (optional)
+    latest = None
+    with Session(engine) as session:
+        hist = session.exec(
+            select(WorkoutHistory).where(WorkoutHistory.client_id == cid,
+                                         WorkoutHistory.status == "active")
+            .order_by(WorkoutHistory.week_number.desc())
+        ).first()
+    if hist is not None:
+        try:
+            latest = WorkoutWeek.model_validate_json(hist.workout_json)
+        except Exception:
+            latest = None
+
+    draft = None
+    try:
+        draft = FlashCommunicationService().draft_qa_answer(question_text, client, latest)
+    except Exception:
+        logging.exception("draft_qa_answer failed client_id=%s", cid)
+
+    q = ClientQuestion(question_id=f"q_{uuid.uuid4().hex[:12]}", client_id=cid, client_chat_id=chat_id,
+                       coach_recipient_id=coach_id, question_text=question_text, draft_answer=draft,
+                       status="pending", created_at=datetime.now(timezone.utc))
+    with Session(engine, expire_on_commit=False) as session:
+        session.add(q); session.commit()
+
+    await _dm_coach_question(context.bot, q)
+    await update.message.reply_text("✅ Sent to your coach — they'll reply here.")
+    return ConversationHandler.END
 
 
 # ── /override COMMAND — coach exercise substitution ────────────────────────────
@@ -5792,6 +5897,17 @@ def main():
         per_message=False,
     ))
 
+    # ── Client Q&A: /ask + rewired "❓ Question" button (SP-C) ──
+    app.add_handler(ConversationHandler(
+        entry_points=[
+            CommandHandler("ask", start_ask),
+            CallbackQueryHandler(start_ask, pattern=r"^ack_question$"),
+        ],
+        states={ASK_QA_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_qa_question)]},
+        fallbacks=[CommandHandler("cancel", cancel)],
+        per_message=False,
+    ))
+
     # ── Admin: workout reject + form-check tip editing ──
     app.add_handler(ConversationHandler(
         entry_points=[
@@ -5917,7 +6033,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_fc_confirm, pattern=r"^fc_confirm_"))
     app.add_handler(CallbackQueryHandler(handle_nutrition_approve, pattern=r"^nutrapprove:"))
     app.add_handler(CallbackQueryHandler(handle_nutrition_discard, pattern=r"^nutrdiscard:"))
-    app.add_handler(CallbackQueryHandler(handle_plan_ack, pattern=r"^ack_"))
+    app.add_handler(CallbackQueryHandler(handle_plan_ack, pattern=r"^ack_(good|ok)$"))
     app.add_handler(CallbackQueryHandler(handle_review_toggle, pattern=r"^review_toggle_batch$"))
     app.add_handler(CallbackQueryHandler(handle_override_remove, pattern=r"^override_remove:"))
     app.add_handler(CallbackQueryHandler(handle_safety_clear, pattern=r"^safety_clear:"))

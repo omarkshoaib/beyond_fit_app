@@ -15,6 +15,7 @@ import app.bot as bot_mod
 _REQUIRES_ACTIVE_SUB = [
     "start_update_profile",
     "cmd_pick_coach",
+    "start_ask",
 ]
 
 _REQUIRES_ASSIGNED_COACH = [
