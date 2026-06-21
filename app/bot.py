@@ -686,6 +686,7 @@ async def start_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def _show_root_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     keyboard = [
         [InlineKeyboardButton("💳 Subscribe", callback_data="menu_subscribe")],
+        [InlineKeyboardButton("✨ Why Beyond Fit?", callback_data="menu_why")],
         [InlineKeyboardButton("❓ Ask a question", callback_data="menu_faq")],
         [InlineKeyboardButton("🔑 I have an account", callback_data="menu_login")],
         [InlineKeyboardButton("🧑‍🏫 I want to coach", callback_data="menu_coach")],
@@ -705,8 +706,51 @@ async def _show_root_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 # ── Pre-payment funnel handlers ────────────────────────────────────────────────
 
+WHY_BEYOND_FIT = (
+    "🏋️ *Why Beyond Fit?*\n\n"
+    "Most fitness apps spit out a generic plan and leave you alone. We're different — every "
+    "client gets a programme built by a deterministic, science-based engine *and* personally "
+    "reviewed and approved by a real human coach before it ever reaches you.\n\n"
+    "*What you get:*\n"
+    "✅ *A real coach in your corner* — every plan is checked and approved by a human, not "
+    "auto-sent by a bot. Message your coach anytime with a question and get a real answer.\n"
+    "🔬 *Programming that actually progresses* — proper periodization, and weekly auto-regulation "
+    "that adjusts your loads to how *you* actually performed at check-in.\n"
+    "🧩 *Built around your reality* — your equipment (even bodyweight-only), your ability (we "
+    "regress the lifts you can't do *yet* and build you up), and your injuries (safe "
+    "substitutions, never \"push through it\").\n"
+    "🥗 *Halal nutrition* — clean, balanced meal plans that fit your goal.\n"
+    "📈 *You vs. last week* — you check in, we adapt. Real progression, not the same plan on repeat.\n\n"
+    "This is coaching that adapts to you — not a one-size-fits-all PDF.\n\n"
+    "Tap *See plans* to get started. 👇"
+)
 
-async def handle_menu_subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+
+def _pitch_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💳 See plans →", callback_data="menu_see_plans")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="menu_back")],
+    ])
+
+
+async def _show_pitch(query) -> str:
+    await query.edit_message_text(WHY_BEYOND_FIT, reply_markup=_pitch_keyboard(), parse_mode="Markdown")
+    return MENU_ROOT
+
+
+async def handle_menu_subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    query = update.callback_query
+    await query.answer()
+    return await _show_pitch(query)
+
+
+async def handle_menu_why(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    query = update.callback_query
+    await query.answer()
+    return await _show_pitch(query)
+
+
+async def handle_menu_see_plans(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     query = update.callback_query
     await query.answer()
     s = get_settings()
@@ -715,10 +759,7 @@ async def handle_menu_subscribe(update: Update, context: ContextTypes.DEFAULT_TY
         [InlineKeyboardButton(f"3 Months — EGP {s.subscription_price_3m_egp}", callback_data="sub_pick:3m")],
         [InlineKeyboardButton("⬅️ Back", callback_data="menu_back")],
     ]
-    await query.edit_message_text(
-        "Choose your plan:",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-    )
+    await query.edit_message_text("Choose your plan:", reply_markup=InlineKeyboardMarkup(keyboard))
     return SUBSCRIBE_PICK_PLAN
 
 
@@ -5874,6 +5915,9 @@ def main():
     _menu_states = {
         MENU_ROOT: [
             CallbackQueryHandler(handle_menu_subscribe, pattern=r"^menu_subscribe$"),
+            CallbackQueryHandler(handle_menu_why, pattern=r"^menu_why$"),
+            CallbackQueryHandler(handle_menu_see_plans, pattern=r"^menu_see_plans$"),
+            CallbackQueryHandler(handle_menu_back, pattern=r"^menu_back$"),
             CallbackQueryHandler(handle_menu_faq, pattern=r"^menu_faq$"),
             CallbackQueryHandler(handle_menu_login, pattern=r"^menu_login$"),
             CallbackQueryHandler(handle_menu_coach, pattern=r"^menu_coach$"),
