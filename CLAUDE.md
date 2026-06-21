@@ -162,6 +162,13 @@ A single large in-memory list of exercise dicts (`EXPANDED_EXERCISES_DATA`). Eac
   (or a dismissal note — the client always hears back) is DM'd via `resolve_primary_chat_id`.
   Max 3 pending questions/client; the LLM draft is never auto-sent. Alembic 0022. See
   `docs/superpowers/specs/2026-06-21-spc-client-coach-qa-design.md`.
+- The pre-payment funnel shows a static pitch before prices (SP-D): **💳 Subscribe** →
+  `WHY_BEYOND_FIT` pitch (`_show_pitch`, returns `MENU_ROOT`) → **💳 See plans**
+  (`handle_menu_see_plans`, the old price-picker body, returns `SUBSCRIBE_PICK_PLAN`) →
+  payment (unchanged). A **✨ Why Beyond Fit?** root-menu button (`handle_menu_why`) reaches
+  the same pitch. `menu_back` is registered in `MENU_ROOT` so the pitch's Back works. Static
+  copy — no LLM/model/migration. See
+  `docs/superpowers/specs/2026-06-21-spd-prepayment-pitch-design.md`.
 
 ## Environment variables
 

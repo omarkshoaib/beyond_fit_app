@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.0] — 2026-06-21 — SP-D: pre-payment pitch
+
+### Added
+- A compelling static pitch ("Why Beyond Fit?") is now shown before the plan prices in the
+  subscribe funnel (and via a root-menu button), so prospects know what they're paying for —
+  human-approved plans, weekly auto-regulation, ability/equipment/injury-aware programming,
+  halal nutrition, and a direct line to their coach. No model/migration.
+
 ## [1.6.0] — 2026-06-21 — SP-C: client↔coach Q&A
 
 ### Added
