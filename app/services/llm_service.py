@@ -82,6 +82,34 @@ class FlashCommunicationService:
         )
         return self._llm.complete(system=system_instruction, user=prompt, temperature=0.3)
 
+    def draft_qa_answer(self, question: str, profile: "ClientProfile",
+                        latest_workout: "WorkoutWeek | None") -> str:
+        """Draft a RECOMMENDED answer to a client's question, grounded in their profile and
+        current plan. This is a DRAFT for the human coach to review — never sent as-is."""
+        system_instruction = (
+            "You are an elite strength & conditioning coach drafting a SUGGESTED reply to a "
+            "client's question, for your head coach to review before it is sent. Ground the "
+            "answer in the client's profile and current plan. Be concise (2-5 sentences), "
+            "specific, and safe; if the question needs medical or in-person assessment, say so "
+            "rather than guessing. Plain text suitable for a messaging app; no preamble."
+        )
+        plan_section = (latest_workout.model_dump_json(indent=2)
+                        if latest_workout is not None else "(no active plan yet)")
+        prompt = (
+            f"CLIENT PROFILE:\n{profile.model_dump_json(indent=2)}\n\n"
+            f"CURRENT PLAN:\n{plan_section}\n\n"
+            f"CLIENT QUESTION:\n{question}\n\n"
+            "Draft the suggested answer."
+        )
+        for attempt in range(3):
+            try:
+                return self._llm.complete(system=system_instruction, user=prompt, temperature=0.4)
+            except Exception as e:
+                if attempt == 2:
+                    raise
+                logger.warning("draft_qa_answer LLM call failed (attempt %d/3): %s", attempt + 1, e)
+                time.sleep(2 ** attempt)
+
     def apply_coach_edits(self, workout_json: str, coach_feedback: str) -> str:
         system_instruction = (
             "You are a programmatic JSON manipulator acting as the backbone of a deterministic coaching app.\n"
