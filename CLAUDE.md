@@ -152,6 +152,16 @@ A single large in-memory list of exercise dicts (`EXPANDED_EXERCISES_DATA`). Eac
   above-ability lift). Powerlifter competition mains are exempt (tier 5). A bodyweight main
   collects RPE (not weight) at check-in. Variation auto-progression over time is **SP-B2**
   (deferred). See `docs/superpowers/specs/2026-06-20-spb1-ability-regressions-design.md`.
+- Clients can ask their coach a question (SP-C): `/ask` or the (now-live) plan "❓ Question"
+  button → `ClientQuestion` row → `FlashCommunicationService.draft_qa_answer` drafts a
+  recommended answer + `_build_client_summary` background → DM'd to the assigned coach
+  (super-admin fallback via `_resolve_review_recipient`) with **Send draft / Edit & send /
+  Dismiss**. The coach's free-text "Edit & send" state (`QA_COACH_ANSWER`) lives **inside the
+  existing admin/coach ConversationHandler** (not a parallel one) so it never collides with the
+  plan-reject `ADMIN_FEEDBACK` state; the `question_id` rides in `callback_data`. The answer
+  (or a dismissal note — the client always hears back) is DM'd via `resolve_primary_chat_id`.
+  Max 3 pending questions/client; the LLM draft is never auto-sent. Alembic 0022. See
+  `docs/superpowers/specs/2026-06-21-spc-client-coach-qa-design.md`.
 
 ## Environment variables
 

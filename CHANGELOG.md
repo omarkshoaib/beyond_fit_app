@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.6.0] — 2026-06-21 — SP-C: client↔coach Q&A
+
+### Added
+- Clients can ask their coach a question (`/ask` or the now-live plan "❓ Question" button);
+  routed to the coach with an LLM-drafted answer + client background; coach Sends / Edits /
+  Dismisses; the answer is DM'd back. New `ClientQuestion` table (Alembic 0022). Max 3 pending
+  questions/client; the LLM draft is always coach-reviewed, never auto-sent. The dead-end
+  "Question" button (which promised a coach reply that never came) now actually delivers.
+
 ## [1.5.0] — 2026-06-20 — SP-B1: ability-appropriate exercise selection
 
 First half of SP-B (B2 = auto-progression, deferred).
