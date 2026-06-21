@@ -5998,6 +5998,9 @@ def main():
         states={ASK_QA_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_qa_question)]},
         fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
+        # Auto-END if the client taps "❓ Question" then wanders off, so a later unrelated
+        # message isn't silently captured as a coach question (PTB auto-ENDs on timeout).
+        conversation_timeout=180,
     ))
 
     # ── Admin: workout reject + form-check tip editing + coach Q&A answer (SP-C) ──
