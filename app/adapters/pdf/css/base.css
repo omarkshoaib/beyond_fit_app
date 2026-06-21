@@ -1,31 +1,32 @@
-/* base.css — reset, CSS variables, typography */
+/* base.css — reset, design tokens, typography (premium editorial) */
 
 :root {
-    /* Palette A "Studio" — workout */
-    --ink: #0F1720;
-    --paper: #FAFAF7;
-    --accent: #FF5A1F;
-    --accent-alt: #1E6F5C;    /* deload */
-    --muted: #6B7280;
-    --border: #E5E7EB;
-    --surface: #F3F4F6;
+    /* ── Editorial palette — unified across workout + nutrition ─────────── */
+    --ink: #211F1C;          /* near-black, warm */
+    --paper: #FCFAF6;        /* warm off-white */
+    --accent: #B5532F;       /* terracotta */
+    --accent-alt: #7D7468;   /* deload — warm stone */
+    --gold: #C9A24B;         /* secondary chart tone */
+    --muted: #8C8479;        /* warm grey text */
+    --border: #E6E1D8;       /* hairline */
+    --surface: #F4F0E8;      /* tile / fill */
 
-    /* Palette C "Wellness" — nutrition */
-    --primary: #2F5D50;
-    --accent-n: #E07856;
-    --paper-n: #F7F3EC;
+    /* Nutrition tokens now alias the unified system (retires the green theme) */
+    --primary: #211F1C;
+    --accent-n: #B5532F;
+    --paper-n: #FCFAF6;
 
-    /* Typography */
-    --font-heading: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
-    --font-body: 'Inter', 'Helvetica Neue', Arial, sans-serif;
-    --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+    /* ── Typography — bundled OFL fonts (see renderer @font-face) ────────── */
+    --font-heading: 'Fraunces', Georgia, 'DejaVu Serif', serif;
+    --font-body: 'Source Sans 3', 'Helvetica Neue', 'DejaVu Sans', sans-serif;
+    --font-mono: 'Source Sans 3', 'Helvetica Neue', sans-serif; /* monospace retired */
 
     /* Spacing */
     --space-xs: 4pt;
     --space-sm: 8pt;
     --space-md: 16pt;
-    --space-lg: 24pt;
-    --space-xl: 32pt;
+    --space-lg: 26pt;
+    --space-xl: 36pt;
 }
 
 * {
@@ -36,51 +37,70 @@
 
 body {
     font-family: var(--font-body);
-    font-size: 10pt;
-    line-height: 1.5;
+    font-size: 10.25pt;
+    line-height: 1.55;
     color: var(--ink);
     background: var(--paper);
-    hyphens: auto;
+    hyphens: none;
 }
 
 h1, h2, h3, h4, h5 {
     font-family: var(--font-heading);
-    font-weight: 700;
-    line-height: 1.2;
+    font-weight: 600;
+    line-height: 1.12;
     color: var(--ink);
+    letter-spacing: -0.01em;
 }
 
-h1 { font-size: 28pt; font-weight: 900; }
-h2 { font-size: 18pt; }
+h1 { font-size: 33pt; font-weight: 600; }
+h2 { font-size: 19pt; }
 h3 { font-size: 14pt; }
 h4 { font-size: 12pt; }
-h5 { font-size: 10pt; text-transform: uppercase; letter-spacing: 0.08em; }
+h5 {
+    font-family: var(--font-body);
+    font-size: 8.5pt;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--muted);
+}
 
 p { margin-bottom: var(--space-sm); }
 
 code, .mono {
     font-family: var(--font-mono);
-    font-size: 9pt;
+    font-size: 9.5pt;
 }
 
 .accent   { color: var(--accent); }
 .muted    { color: var(--muted); }
-.primary  { color: var(--primary); }
+.primary  { color: var(--ink); }
 
 .text-right  { text-align: right; }
 .text-center { text-align: center; }
 
-.badge {
-    display: inline-block;
-    padding: 2pt 6pt;
-    border-radius: 3pt;
-    font-size: 8pt;
+/* Small-caps editorial section label */
+.eyebrow {
+    font-family: var(--font-body);
+    font-size: 8.5pt;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.18em;
+    color: var(--accent);
 }
 
-.badge-accent   { background: var(--accent); color: #fff; }
-.badge-primary  { background: var(--primary); color: #fff; }
+.badge {
+    display: inline-block;
+    padding: 2pt 7pt;
+    border-radius: 2pt;
+    font-family: var(--font-body);
+    font-size: 7.5pt;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.badge-accent   { background: var(--accent); color: var(--paper); }
+.badge-primary  { background: var(--ink); color: var(--paper); }
 .badge-muted    { background: var(--surface); color: var(--muted); }
-.badge-deload   { background: var(--accent-alt); color: #fff; }
+.badge-deload   { background: var(--accent-alt); color: var(--paper); }

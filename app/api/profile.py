@@ -121,5 +121,32 @@ def delete_my_account(
     for p in pendings:
         session.delete(p)
 
+    # Scrub PII embedded in profile snapshots (snapshot_json is a full ClientProfile dump).
+    _PII_KEYS = ("email", "name", "password_hash")
+    snapshots = session.exec(
+        select(ProfileSnapshot).where(ProfileSnapshot.client_id == user.client_id)
+    ).all()
+    for snap in snapshots:
+        try:
+            data = json.loads(snap.snapshot_json)
+        except (ValueError, TypeError):
+            data = None
+        if isinstance(data, dict):
+            for k in _PII_KEYS:
+                if k in data:
+                    data[k] = None
+            snap.snapshot_json = json.dumps(data)
+        else:
+            snap.snapshot_json = "{}"
+        session.add(snap)
+
+    # Null PII on in-app feedback rows.
+    feedbacks = session.exec(
+        select(Feedback).where(Feedback.client_id == user.client_id)
+    ).all()
+    for fb in feedbacks:
+        fb.email = None
+        session.add(fb)
+
     session.commit()
     return {"ok": True, "anonymised": True}

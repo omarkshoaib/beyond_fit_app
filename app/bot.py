@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 import json
 import signal
@@ -10,6 +11,7 @@ import time
 from collections import defaultdict
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import NetworkError, Conflict, BadRequest
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -20,6 +22,7 @@ from telegram.ext import (
     ConversationHandler,
 )
 from sqlmodel import Session, select
+from pydantic import ValidationError
 
 import tempfile
 from pathlib import Path
@@ -33,7 +36,7 @@ from datetime import datetime, timedelta, timezone
 from app.models import (
     ClientProfile, WorkoutWeek, WorkoutSlot, PendingApproval, WorkoutHistory, ProfileSnapshot,
     NutritionProfile, NutritionPlan, CheckIn,
-    AccessCode, Payment, Subscription, ChatBinding, CoachProfile,
+    AccessCode, Payment, Subscription, ChatBinding, CoachProfile, ClientQuestion,
 )
 from app.database import engine, create_db_and_tables
 from app.auth import roles as auth_roles
@@ -62,6 +65,7 @@ from app.settings import get_settings
 from app.adapters.llm.extractors import extract_checkin, render_digest
 from app.adapters.llm.openrouter import OpenRouterClient
 from app.domain.workout.autoregulation import derive_plan_delta, apply_delta
+from app.domain.workout.equipment import floor_equipment
 
 load_dotenv()
 
@@ -154,6 +158,28 @@ async def safe_send_markdown(bot, chat_id, text, reply_markup=None):
 # ── Intake states (ints for backward compat) ──────────────────────────────────
 ASK_AVATAR, ASK_DAYS, ASK_EXPERIENCE, ASK_LIMITATIONS, ASK_EMAIL = range(5)
 ASK_LIMITATIONS_OTHER = "ASK_LIMITATIONS_OTHER"
+# Baseline-lift intake states (A.4). Strings keep them distinct from the ints above
+# within the single intake ConversationHandler.
+ASK_BASE_SQUAT = "ASK_BASE_SQUAT"
+ASK_BASE_BENCH = "ASK_BASE_BENCH"
+ASK_BASE_DEADLIFT = "ASK_BASE_DEADLIFT"
+# Equipment survey states (SP-A C1). Strings keep them distinct from the intake ints.
+ASK_EQUIPMENT = "ASK_EQUIPMENT"
+ASK_EQUIPMENT_CUSTOM = "ASK_EQUIPMENT_CUSTOM"
+ASK_EQUIPMENT_PULLUP = "ASK_EQUIPMENT_PULLUP"
+# Ability survey state (SP-B1 C4).
+ASK_ABILITY = "ASK_ABILITY"
+_ABILITY_FAMILIES = ["squat", "hinge", "horizontal_push", "vertical_push",
+                     "horizontal_pull", "vertical_pull"]
+_ABILITY_FAMILY_PROMPT = {
+    "squat": "your SQUAT (bodyweight squat → barbell back squat)",
+    "hinge": "your HINGE / DEADLIFT (glute bridge → barbell deadlift)",
+    "horizontal_push": "your PUSH (push-ups → bench press)",
+    "vertical_push": "your OVERHEAD PRESS (pike push-up → barbell OHP)",
+    "horizontal_pull": "your ROW (inverted row → barbell row)",
+    "vertical_pull": "your PULL-UP (assisted → strict/weighted pull-up)",
+}
+_ABILITY_LEVEL = {"1": 2, "2": 3, "3": 4}  # button value -> ability tier (2/3/4)
 
 # ── /update_profile field-picker states (strings, isolated from intake) ───────
 UPD_PICK = "UPD_PICK"
@@ -163,6 +189,7 @@ UPD_EXP = "UPD_EXP"
 UPD_LIM = "UPD_LIM"
 UPD_LIM_OTHER = "UPD_LIM_OTHER"
 UPD_EMAIL = "UPD_EMAIL"
+UPD_EQUIPMENT = "UPD_EQUIPMENT"
 
 # ── Admin states ──────────────────────────────────────────────────────────────
 ADMIN_FEEDBACK = 100
@@ -213,6 +240,12 @@ FORMCHECK_TIPS_CONFIRM = 101
     "COACH_APPLY_CV", "COACH_APPLY_PORTFOLIO", "COACH_REJECT_REASON",
 ]
 
+
+# ── Client Q&A states + caps (SP-C) ──────────────────────────────────────────
+ASK_QA_QUESTION = "ASK_QA_QUESTION"
+QA_COACH_ANSWER = "QA_COACH_ANSWER"
+_QA_MAX_PENDING = 3
+_QA_MAX_LEN = 1000
 
 # ── FAQ rate limiter (5 questions / chat / hour) ───────────────────────────────
 # Maps chat_id → list of monotonic timestamps within the rolling window.
@@ -522,6 +555,7 @@ async def run_generation_and_dispatch(
             keyboard = [[
                 InlineKeyboardButton("✅ Approve", callback_data=f"approve:{approval_id}"),
                 InlineKeyboardButton("❌ Reject", callback_data=f"reject:{approval_id}"),
+                InlineKeyboardButton("➕ Add core", callback_data=f"addcore:{approval_id}"),
             ]]
 
             summary = _build_client_summary(client_user_id)
@@ -536,6 +570,15 @@ async def run_generation_and_dispatch(
             notes_section = ""
             if gen_notes:
                 notes_section = "\n\n*Generator notes:*\n" + "\n".join(f"• {n}" for n in gen_notes)
+            from app.domain.workout.equipment import equipment_gap_note, validate_equipment
+            gap = equipment_gap_note(profile.available_equipment if profile else None)
+            if gap:
+                notes_section += f"\n\n{gap}"
+            # Add-core path (_core_choices_for_client) is already equipment-filtered — no guard needed there.
+            _gen_violations = validate_equipment(new_workout, profile.available_equipment if profile else None)
+            if _gen_violations:
+                bad_list = ", ".join(f"{v.exercise_name} (needs {', '.join(v.missing)})" for v in _gen_violations)
+                notes_section += f"\n\n🚫 *Equipment mismatch in this plan:* {bad_list}"
 
             admin_text = (
                 f"🔔 *Plan ready for approval — Week {new_workout.week_number}*\n\n"
@@ -643,6 +686,7 @@ async def start_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def _show_root_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     keyboard = [
         [InlineKeyboardButton("💳 Subscribe", callback_data="menu_subscribe")],
+        [InlineKeyboardButton("✨ Why Beyond Fit?", callback_data="menu_why")],
         [InlineKeyboardButton("❓ Ask a question", callback_data="menu_faq")],
         [InlineKeyboardButton("🔑 I have an account", callback_data="menu_login")],
         [InlineKeyboardButton("🧑‍🏫 I want to coach", callback_data="menu_coach")],
@@ -662,8 +706,51 @@ async def _show_root_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 # ── Pre-payment funnel handlers ────────────────────────────────────────────────
 
+WHY_BEYOND_FIT = (
+    "🏋️ *Why Beyond Fit?*\n\n"
+    "Most fitness apps spit out a generic plan and leave you alone. We're different — every "
+    "client gets a programme built by a deterministic, science-based engine *and* personally "
+    "reviewed and approved by a real human coach before it ever reaches you.\n\n"
+    "*What you get:*\n"
+    "✅ *A real coach in your corner* — every plan is checked and approved by a human, not "
+    "auto-sent by a bot. Message your coach anytime with a question and get a real answer.\n"
+    "🔬 *Programming that actually progresses* — proper periodization, and weekly auto-regulation "
+    "that adjusts your loads to how *you* actually performed at check-in.\n"
+    "🧩 *Built around your reality* — your equipment (even bodyweight-only), your ability (we "
+    "regress the lifts you can't do *yet* and build you up), and your injuries (safe "
+    "substitutions, never \"push through it\").\n"
+    "🥗 *Halal nutrition* — clean, balanced meal plans that fit your goal.\n"
+    "📈 *You vs. last week* — you check in, we adapt. Real progression, not the same plan on repeat.\n\n"
+    "This is coaching that adapts to you — not a one-size-fits-all PDF.\n\n"
+    "Tap *See plans* to get started. 👇"
+)
 
-async def handle_menu_subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+
+def _pitch_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💳 See plans →", callback_data="menu_see_plans")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="menu_back")],
+    ])
+
+
+async def _show_pitch(query) -> str:
+    await query.edit_message_text(WHY_BEYOND_FIT, reply_markup=_pitch_keyboard(), parse_mode="Markdown")
+    return MENU_ROOT
+
+
+async def handle_menu_subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    query = update.callback_query
+    await query.answer()
+    return await _show_pitch(query)
+
+
+async def handle_menu_why(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    query = update.callback_query
+    await query.answer()
+    return await _show_pitch(query)
+
+
+async def handle_menu_see_plans(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     query = update.callback_query
     await query.answer()
     s = get_settings()
@@ -672,10 +759,7 @@ async def handle_menu_subscribe(update: Update, context: ContextTypes.DEFAULT_TY
         [InlineKeyboardButton(f"3 Months — EGP {s.subscription_price_3m_egp}", callback_data="sub_pick:3m")],
         [InlineKeyboardButton("⬅️ Back", callback_data="menu_back")],
     ]
-    await query.edit_message_text(
-        "Choose your plan:",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-    )
+    await query.edit_message_text("Choose your plan:", reply_markup=InlineKeyboardMarkup(keyboard))
     return SUBSCRIBE_PICK_PLAN
 
 
@@ -1873,7 +1957,7 @@ async def handle_avatar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     ]]
     await query.edit_message_text(
         f"Great, {display}!\n\nHow many days a week can you train?",
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        reply_markup=_with_back(InlineKeyboardMarkup(keyboard), ASK_DAYS),
     )
     return ASK_DAYS
 
@@ -1883,12 +1967,125 @@ async def handle_days(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     await query.answer()
     context.user_data['days'] = int(query.data)
 
+    await query.edit_message_text(
+        "What equipment do you have access to?",
+        reply_markup=_with_back(_equipment_preset_keyboard(), ASK_EQUIPMENT),
+    )
+    return ASK_EQUIPMENT
+
+
+def _equipment_preset_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🏢 Commercial gym (everything)", callback_data="equip_preset:commercial")],
+        [InlineKeyboardButton("🏠 Home gym — customize", callback_data="equip_preset:home")],
+        [InlineKeyboardButton("🧰 Minimal (bodyweight + pull-up bar)", callback_data="equip_preset:minimal")],
+        [InlineKeyboardButton("🧍 Bodyweight only", callback_data="equip_preset:bodyweight")],
+        [InlineKeyboardButton("⚙️ Custom — pick each item", callback_data="equip_preset:custom")],
+    ])
+
+
+def _equipment_checklist_keyboard(selected: set) -> InlineKeyboardMarkup:
+    from app.domain.workout.equipment import CHECKLIST_TOKENS
+    rows = []
+    for i in range(0, len(CHECKLIST_TOKENS), 2):
+        row = []
+        for tok in CHECKLIST_TOKENS[i:i + 2]:
+            label = f"✓ {tok}" if tok in selected else tok
+            row.append(InlineKeyboardButton(label, callback_data=f"equip_toggle_{tok}"))
+        rows.append(row)
+    rows.append([InlineKeyboardButton("✅ Done", callback_data="equip_confirm")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _pullup_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Yes", callback_data="equip_pullup:yes"),
+        InlineKeyboardButton("❌ No", callback_data="equip_pullup:no"),
+    ]])
+
+
+async def _prompt_experience(send) -> None:
     keyboard = [
         [InlineKeyboardButton("Beginner", callback_data="beginner")],
         [InlineKeyboardButton("Intermediate", callback_data="intermediate")],
         [InlineKeyboardButton("Advanced", callback_data="advanced")],
     ]
-    await query.edit_message_text("What is your experience level?", reply_markup=InlineKeyboardMarkup(keyboard))
+    await send("What is your experience level?",
+               reply_markup=_with_back(InlineKeyboardMarkup(keyboard), ASK_EXPERIENCE))
+
+
+async def handle_equipment_preset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from app.domain.workout.equipment import EQUIPMENT_PRESETS
+    query = update.callback_query
+    await query.answer()
+    preset = query.data.split(":", 1)[1]
+    context.user_data["equip_preset"] = preset
+    if preset == "commercial":
+        context.user_data["available_equipment"] = list(EQUIPMENT_PRESETS["commercial"])
+        await _prompt_experience(query.edit_message_text)
+        return ASK_EXPERIENCE
+    if preset == "minimal":
+        context.user_data["available_equipment"] = list(EQUIPMENT_PRESETS["minimal"])
+        await _prompt_experience(query.edit_message_text)
+        return ASK_EXPERIENCE
+    if preset == "bodyweight":
+        await query.edit_message_text(
+            "Do you have a pull-up bar? It unlocks all your back/pull training.",
+            reply_markup=_with_back(_pullup_keyboard(), ASK_EQUIPMENT_PULLUP),
+        )
+        return ASK_EQUIPMENT_PULLUP
+    # home (pre-checked) or custom (empty) -> open the checklist
+    selected = set(EQUIPMENT_PRESETS["home"]) if preset == "home" else set()
+    selected.discard("bodyweight")  # bodyweight is implicit, not a checkbox
+    context.user_data["equip_selected"] = selected
+    await query.edit_message_text(
+        "Check everything you have, then tap Done:",
+        reply_markup=_with_back(_equipment_checklist_keyboard(selected), ASK_EQUIPMENT_CUSTOM),
+    )
+    return ASK_EQUIPMENT_CUSTOM
+
+
+async def handle_equipment_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    tok = query.data[len("equip_toggle_"):]
+    selected: set = context.user_data.get("equip_selected", set())
+    if tok in selected:
+        selected.discard(tok)
+    else:
+        selected.add(tok)
+    context.user_data["equip_selected"] = selected
+    await query.edit_message_reply_markup(
+        reply_markup=_with_back(_equipment_checklist_keyboard(selected), ASK_EQUIPMENT_CUSTOM))
+    return ASK_EQUIPMENT_CUSTOM
+
+
+async def handle_equipment_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    selected = sorted(context.user_data.get("equip_selected", set()))
+    # bodyweight is always available; persist it alongside the picked machines.
+    tokens = floor_equipment(selected + ["bodyweight"] if selected else [])
+    context.user_data["available_equipment"] = tokens
+    await _prompt_experience(query.edit_message_text)
+    return ASK_EXPERIENCE
+
+
+async def handle_equipment_pullup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    answer = query.data.split(":", 1)[1]
+    if answer == "yes":
+        context.user_data["available_equipment"] = ["bodyweight", "pull_up_bar"]
+        await _prompt_experience(query.edit_message_text)
+    else:
+        context.user_data["available_equipment"] = ["bodyweight"]
+        await query.edit_message_text(
+            "Heads up: bodyweight-only means *no back/pull training* until you get a "
+            "pull-up bar or your coach adds bands. Your coach will see this.",
+            parse_mode="Markdown",
+        )
+        await _prompt_experience(query.message.reply_text)
     return ASK_EXPERIENCE
 
 
@@ -1919,16 +2116,83 @@ def _build_limitations_keyboard(selected: set) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
+def _parse_baseline_set(text: str):
+    """Parse 'WxR' (weight x reps) like '100x5'. Returns (weight, reps) or None.
+
+    Rejects unparseable input, non-positive weight, and reps > 10 (the e1RM
+    formula is unreliable past 10 reps — re-ask rather than seed garbage).
+    """
+    if not text:
+        return None
+    m = re.match(r"^\s*(\d+(?:\.\d+)?)\s*[xX*]\s*(\d+)\s*$", text.strip())
+    if not m:
+        return None
+    weight = float(m.group(1))
+    reps = int(m.group(2))
+    if weight <= 0 or reps < 1 or reps > 10:
+        return None
+    return (weight, reps)
+
+
+def _ability_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🌱 New / can't yet", callback_data="abil:1")],
+        [InlineKeyboardButton("💪 I can do the standard version", callback_data="abil:2")],
+        [InlineKeyboardButton("🏋️ Strong — barbell/loaded", callback_data="abil:3")],
+        [InlineKeyboardButton("⏭️ Skip — use my experience level", callback_data="abil_skip")],
+    ])
+
+
+async def _prompt_ability(send, idx: int) -> None:
+    fam = _ABILITY_FAMILIES[idx]
+    await send(
+        f"Quick ability check ({idx + 1}/6) — how's {_ABILITY_FAMILY_PROMPT[fam]}?",
+        reply_markup=_with_back(_ability_keyboard(), ASK_ABILITY),
+    )
+
+
+async def _prompt_limitations(send, context: ContextTypes.DEFAULT_TYPE) -> None:
+    selected = context.user_data.get("selected_limitations", set())
+    await send(
+        "Select any injuries or limitations:",
+        reply_markup=_with_back(_build_limitations_keyboard(selected), ASK_LIMITATIONS),
+    )
+
+
+async def handle_ability(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from app.domain.workout.ability import global_ability
+    query = update.callback_query
+    await query.answer()
+    context.user_data.setdefault("exercise_ability", {})
+    idx = context.user_data.get("ability_idx", 0)
+
+    if query.data == "abil_skip":
+        default = global_ability(context.user_data.get("experience_level", "beginner"))
+        for fam in _ABILITY_FAMILIES:
+            context.user_data["exercise_ability"].setdefault(fam, default)
+        await _prompt_limitations(query.edit_message_text, context)
+        return ASK_LIMITATIONS
+
+    level = _ABILITY_LEVEL[query.data.split(":", 1)[1]]
+    context.user_data["exercise_ability"][_ABILITY_FAMILIES[idx]] = level
+    idx += 1
+    context.user_data["ability_idx"] = idx
+    if idx >= len(_ABILITY_FAMILIES):
+        await _prompt_limitations(query.edit_message_text, context)
+        return ASK_LIMITATIONS
+    await _prompt_ability(query.edit_message_text, idx)
+    return ASK_ABILITY
+
+
 async def handle_experience(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
     context.user_data['experience_level'] = query.data
     context.user_data['selected_limitations'] = set()
-    await query.edit_message_text(
-        f"Awesome, {query.data.title()}!\n\nSelect any injuries or limitations:",
-        reply_markup=_build_limitations_keyboard(set()),
-    )
-    return ASK_LIMITATIONS
+    context.user_data["ability_idx"] = 0
+    context.user_data["exercise_ability"] = {}
+    await _prompt_ability(query.edit_message_text, 0)
+    return ASK_ABILITY
 
 
 async def handle_limitations_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1949,7 +2213,8 @@ async def handle_limitations_toggle(update: Update, context: ContextTypes.DEFAUL
             selected.add(opt)
 
     context.user_data['selected_limitations'] = selected
-    await query.edit_message_reply_markup(reply_markup=_build_limitations_keyboard(selected))
+    await query.edit_message_reply_markup(
+        reply_markup=_with_back(_build_limitations_keyboard(selected), ASK_LIMITATIONS))
     return ASK_LIMITATIONS
 
 
@@ -1965,32 +2230,201 @@ async def handle_limitations_confirm(update: Update, context: ContextTypes.DEFAU
         context.user_data['limitations'] = sorted(s for s in selected if s != "none")
         context.user_data['_ask_limitations_other'] = True
         await query.edit_message_text(
-            "Please describe your limitation in one sentence (e.g. 'recovering from ankle sprain'):"
+            "Please describe your limitation in one sentence (e.g. 'recovering from ankle sprain'):",
+            reply_markup=_with_back(InlineKeyboardMarkup([]), ASK_LIMITATIONS_OTHER),
         )
         return ASK_LIMITATIONS_OTHER
 
+    context.user_data['_ask_limitations_other'] = False        # idempotent: always set
+    context.user_data.pop('limitations_notes', None)            # drop stale 'other' note on replay
     if "none" in selected or not selected:
         context.user_data['limitations'] = []
     else:
         context.user_data['limitations'] = sorted(selected)
 
-    await query.edit_message_text("Almost there! What's your email address? (We'll send your plan PDF here.)")
-    return ASK_EMAIL
+    await _prompt_baseline(query.edit_message_text, "SQUAT", back_state=ASK_BASE_SQUAT)
+    return ASK_BASE_SQUAT
 
 
 async def handle_limitations_other(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Store free-text limitation note and proceed to email."""
+    """Store free-text limitation note and proceed to baseline intake."""
     context.user_data['limitations_notes'] = update.message.text.strip()
-    await update.message.reply_text("Almost there! What's your email address? (We'll send your plan PDF here.)")
-    return ASK_EMAIL
+    await _prompt_baseline(update.message.reply_text, "SQUAT", back_state=ASK_BASE_SQUAT)
+    return ASK_BASE_SQUAT
 
 
 async def handle_limitations(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Legacy free-text fallback for limitations (kept for backwards compat)."""
     text = update.message.text.strip().lower()
     context.user_data['limitations'] = [] if text == "none" else [l.strip() for l in text.split(",")]
-    await update.message.reply_text("Almost there! What's your email address? (We'll send your plan PDF here.)")
-    return ASK_EMAIL
+    await _prompt_baseline(update.message.reply_text, "SQUAT", back_state=ASK_BASE_SQUAT)
+    return ASK_BASE_SQUAT
+
+
+# ── Intake back navigation (SP-A C3) ──────────────────────────────────────────
+
+def _with_back(markup: InlineKeyboardMarkup, leaving) -> InlineKeyboardMarkup:
+    """Append a Back row that encodes the state being left."""
+    rows = list(markup.inline_keyboard)
+    rows.append([InlineKeyboardButton("⬅️ Back", callback_data=f"intake_back:{leaving}")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _intake_predecessor(leaving, context: ContextTypes.DEFAULT_TYPE):
+    """Return the state that precedes `leaving` in the intake flow."""
+    # Normalize: callback_data is always a string, but int-valued states
+    # (ASK_AVATAR=0, ASK_DAYS=1, ASK_EXPERIENCE=2, ASK_LIMITATIONS=3, ASK_EMAIL=4)
+    # arrive as their str representation and must be coerced back.
+    if isinstance(leaving, str) and leaving.lstrip("-").isdigit():
+        leaving = int(leaving)
+
+    if leaving == ASK_EQUIPMENT:
+        return ASK_DAYS
+    if leaving in (ASK_EQUIPMENT_CUSTOM, ASK_EQUIPMENT_PULLUP):
+        return ASK_EQUIPMENT
+    if leaving == ASK_EXPERIENCE:
+        return ASK_EQUIPMENT
+    if leaving == ASK_ABILITY:
+        return ASK_EXPERIENCE
+    if leaving == ASK_LIMITATIONS:
+        return ASK_ABILITY
+    if leaving == ASK_LIMITATIONS_OTHER:
+        return ASK_LIMITATIONS
+    if leaving == ASK_BASE_SQUAT:
+        return ASK_LIMITATIONS_OTHER if context.user_data.get("_ask_limitations_other") else ASK_LIMITATIONS
+    if leaving == ASK_BASE_BENCH:
+        return ASK_BASE_SQUAT
+    if leaving == ASK_BASE_DEADLIFT:
+        return ASK_BASE_BENCH
+    if leaving == ASK_EMAIL:
+        return ASK_BASE_DEADLIFT
+    return ASK_AVATAR
+
+
+async def _render_intake_step(state, query, context: ContextTypes.DEFAULT_TYPE):
+    """Re-render a step pre-filled from committed user_data, and return its state."""
+    ud = context.user_data
+    if state == ASK_DAYS:
+        keyboard = [[InlineKeyboardButton("3 Days", callback_data="3"),
+                     InlineKeyboardButton("4 Days", callback_data="4")],
+                    [InlineKeyboardButton("5 Days", callback_data="5"),
+                     InlineKeyboardButton("6 Days", callback_data="6")]]
+        await query.edit_message_text("How many days a week can you train?",
+                                      reply_markup=_with_back(InlineKeyboardMarkup(keyboard), ASK_DAYS))
+        return ASK_DAYS
+    if state == ASK_EQUIPMENT:
+        await query.edit_message_text("What equipment do you have access to?",
+                                      reply_markup=_with_back(_equipment_preset_keyboard(), ASK_EQUIPMENT))
+        return ASK_EQUIPMENT
+    if state == ASK_EXPERIENCE:
+        await _prompt_experience(query.edit_message_text)
+        return ASK_EXPERIENCE
+    if state == ASK_ABILITY:
+        # clamp: after the 6th answer ability_idx == len(families); re-prompt the last family
+        idx = min(ud.get("ability_idx", 0), len(_ABILITY_FAMILIES) - 1)
+        await _prompt_ability(query.edit_message_text, idx)
+        return ASK_ABILITY
+    if state == ASK_LIMITATIONS:
+        await _prompt_limitations(query.edit_message_text, context)
+        return ASK_LIMITATIONS
+    if state == ASK_LIMITATIONS_OTHER:
+        await query.edit_message_text(
+            "Please describe your limitation in one sentence (e.g. 'recovering from ankle sprain'):",
+            reply_markup=_with_back(InlineKeyboardMarkup([]), ASK_LIMITATIONS_OTHER))
+        return ASK_LIMITATIONS_OTHER
+    if state in (ASK_BASE_SQUAT, ASK_BASE_BENCH, ASK_BASE_DEADLIFT):
+        lift = {ASK_BASE_SQUAT: "SQUAT", ASK_BASE_BENCH: "BENCH PRESS",
+                ASK_BASE_DEADLIFT: "DEADLIFT"}[state]
+        await _prompt_baseline(query.edit_message_text, lift, back_state=state)
+        return state
+    # Fallback: re-render avatar step (no Back button at the first step)
+    keyboard = [[InlineKeyboardButton("Powerlifter", callback_data="powerlifter")],
+                [InlineKeyboardButton("Powerbuilder", callback_data="powerbuilder")],
+                [InlineKeyboardButton("General Fitness", callback_data="gen_pop")]]
+    await query.edit_message_text("What is your primary training goal?",
+                                  reply_markup=InlineKeyboardMarkup(keyboard))
+    return ASK_AVATAR
+
+
+async def handle_intake_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Go back one intake step (forward-replay model). The state being LEFT is encoded
+    in callback_data as 'intake_back:<STATE>'; we compute its predecessor from
+    context.user_data and re-render that step pre-filled."""
+    query = update.callback_query
+    await query.answer()
+    leaving = query.data.split(":", 1)[1]
+    target = _intake_predecessor(leaving, context)
+    return await _render_intake_step(target, query, context)
+
+
+# ── Baseline-lift handlers (A.4) ──────────────────────────────────────────────
+
+def _baseline_keyboard(back_state=None) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton("Skip", callback_data="base_skip")]]
+    if back_state is not None:
+        rows.append([InlineKeyboardButton("⬅️ Back", callback_data=f"intake_back:{back_state}")])
+    return InlineKeyboardMarkup(rows)
+
+
+async def _prompt_baseline(target, lift: str, back_state=None) -> None:
+    await target(
+        f"Optional — your best recent {lift} set? Reply like 100x5 (weight×reps, "
+        f"reps ≤ 10), or tap Skip.",
+        reply_markup=_baseline_keyboard(back_state=back_state),
+    )
+
+
+# Maps a baseline field to the state that re-asks it (used on parse failure).
+_CURRENT_BASELINE_STATE = {
+    "squat_e1rm": ASK_BASE_SQUAT,
+    "bench_e1rm": ASK_BASE_BENCH,
+    "deadlift_e1rm": ASK_BASE_DEADLIFT,
+}
+
+
+async def _store_baseline_and_next(update, context, field: str, next_state, next_lift):
+    """Shared logic for the baseline handlers. Stores e1RM (or None) then prompts next."""
+    query = update.callback_query
+    if query is not None:                 # Skip button
+        await query.answer()
+        context.user_data[field] = None
+        send = query.edit_message_text
+    else:                                  # text reply
+        parsed = _parse_baseline_set(update.message.text)
+        if parsed is None:
+            # Re-ask same state — keep current back button (back to predecessor)
+            current_state = _CURRENT_BASELINE_STATE[field]
+            await update.message.reply_text(
+                "Couldn't read that. Use weight×reps, e.g. 100x5 (reps ≤ 10), or tap Skip.",
+                reply_markup=_baseline_keyboard(back_state=current_state),
+            )
+            return current_state   # re-ask same state
+        weight, reps = parsed
+        from app.domain.workout.loadseed import brzycki_e1rm
+        context.user_data[field] = round(brzycki_e1rm(weight, reps), 1)
+        send = update.message.reply_text
+    if next_lift is not None:
+        # next_state is the state we're moving TO — that's the back_state for that step
+        await _prompt_baseline(send, next_lift, back_state=next_state)
+    else:
+        # Email prompt — add a back-only keyboard so user can go back to deadlift
+        await send(
+            "Almost there! What's your email address? (We'll send your plan PDF here.)",
+            reply_markup=_with_back(InlineKeyboardMarkup([]), ASK_EMAIL),
+        )
+    return next_state
+
+
+async def handle_base_squat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await _store_baseline_and_next(update, context, "squat_e1rm", ASK_BASE_BENCH, "BENCH PRESS")
+
+
+async def handle_base_bench(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await _store_baseline_and_next(update, context, "bench_e1rm", ASK_BASE_DEADLIFT, "DEADLIFT")
+
+
+async def handle_base_deadlift(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await _store_baseline_and_next(update, context, "deadlift_e1rm", ASK_EMAIL, None)
 
 
 async def handle_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -2027,7 +2461,18 @@ async def handle_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 profile.email = email
                 profile.name = first_name
                 profile.limitations_notes = context.user_data.get('limitations_notes', profile.limitations_notes)
-                profile.available_equipment = profile.available_equipment or ["full_gym"]
+                if context.user_data.get('squat_e1rm') is not None:
+                    profile.squat_e1rm = context.user_data['squat_e1rm']
+                if context.user_data.get('bench_e1rm') is not None:
+                    profile.bench_e1rm = context.user_data['bench_e1rm']
+                if context.user_data.get('deadlift_e1rm') is not None:
+                    profile.deadlift_e1rm = context.user_data['deadlift_e1rm']
+                if context.user_data.get('available_equipment'):
+                    profile.available_equipment = floor_equipment(context.user_data['available_equipment'])
+                else:
+                    profile.available_equipment = profile.available_equipment or ["full_gym"]
+                if context.user_data.get('exercise_ability'):
+                    profile.exercise_ability = context.user_data['exercise_ability']
                 session.add(profile)
                 session.commit()
                 session.refresh(profile)
@@ -2042,11 +2487,15 @@ async def handle_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 training_days=context.user_data.get('days', 3),
                 experience_level=context.user_data.get('experience_level', 'intermediate'),
                 limitations=context.user_data.get('limitations', []),
-                available_equipment=["full_gym"],
+                available_equipment=floor_equipment(context.user_data.get('available_equipment')),
                 week_number=1,
                 email=email,
                 name=first_name,
                 limitations_notes=context.user_data.get('limitations_notes'),
+                squat_e1rm=context.user_data.get('squat_e1rm'),
+                bench_e1rm=context.user_data.get('bench_e1rm'),
+                deadlift_e1rm=context.user_data.get('deadlift_e1rm'),
+                exercise_ability=context.user_data.get('exercise_ability'),
             )
             session.add(profile)
             session.commit()
@@ -2079,6 +2528,7 @@ def _upd_pick_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("💪 Experience", callback_data="upd:exp")],
         [InlineKeyboardButton("⚠️ Limitations", callback_data="upd:limit")],
         [InlineKeyboardButton("📧 Email", callback_data="upd:email")],
+        [InlineKeyboardButton("🏋️ Equipment", callback_data="upd:equip")],
         [InlineKeyboardButton("🔄 Regenerate plan with current settings", callback_data="upd:regen")],
         [InlineKeyboardButton("✅ Done", callback_data="upd:done")],
     ])
@@ -2089,7 +2539,8 @@ def _upd_summary_line(profile: ClientProfile) -> str:
         f"Current: *{_AVATAR_LABEL.get(profile.avatar, profile.avatar)}* · "
         f"*{profile.training_days}d/wk* · *{profile.experience_level}* · "
         f"limitations: {', '.join(profile.limitations) if profile.limitations else 'none'} · "
-        f"email: {profile.email or '—'}"
+        f"email: {profile.email or '—'} · "
+        f"equipment: {', '.join(profile.available_equipment) if profile.available_equipment else 'full_gym'}"
     )
 
 
@@ -2198,6 +2649,19 @@ async def upd_pick(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             "Send your new email address (we'll use it for the plan PDF). Type /cancel to abort."
         )
         return UPD_EMAIL
+
+    if choice == "equip":
+        with Session(engine) as session:
+            _p = session.get(ClientProfile, context.user_data["upd_client_id"])
+        current = set(_p.available_equipment or []) if _p else set()
+        # Pre-seed from the client's CURRENT kit so editing adds/removes rather than
+        # wiping it. full_gym (wildcard) and bodyweight (implicit) are never checkboxes.
+        context.user_data["equip_selected"] = {t for t in current if t not in ("full_gym", "bodyweight")}
+        await query.edit_message_text(
+            "Check everything you have, then tap Done:",
+            reply_markup=_equipment_checklist_keyboard(context.user_data["equip_selected"]),
+        )
+        return UPD_EQUIPMENT
 
     return UPD_PICK
 
@@ -2339,6 +2803,32 @@ async def upd_set_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     return UPD_PICK
 
 
+async def upd_equipment_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    query = update.callback_query
+    await query.answer()
+    tok = query.data[len("equip_toggle_"):]
+    selected: set = context.user_data.get("equip_selected", set())
+    if tok in selected:
+        selected.discard(tok)
+    else:
+        selected.add(tok)
+    context.user_data["equip_selected"] = selected
+    await query.edit_message_reply_markup(reply_markup=_equipment_checklist_keyboard(selected))
+    return UPD_EQUIPMENT
+
+
+async def upd_equipment_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    query = update.callback_query
+    await query.answer()
+    selected = sorted(context.user_data.get("equip_selected", set()))
+    tokens = floor_equipment(selected + ["bodyweight"] if selected else [])
+    client_id = context.user_data["upd_client_id"]
+    _save_profile_field(client_id, available_equipment=tokens)
+    context.user_data["upd_dirty"] = True
+    await _upd_show_menu(query, client_id, dirty_note=f"✅ Equipment set to: *{', '.join(tokens)}*.")
+    return UPD_PICK
+
+
 async def _upd_regen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     client_id = context.user_data["upd_client_id"]
@@ -2375,6 +2865,20 @@ def _make_llm_client() -> OpenRouterClient:
         base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
         model_id=os.getenv("LLM_MODEL_ID", "google/gemini-2.5-flash"),
     )
+
+
+def _build_lift_catalog(week: WorkoutWeek) -> list[str]:
+    """Lift catalog handed to the extractor. Each entry MUST lead with the
+    canonical exercise_id (the schema's `exercise_canonical`, which telemetry is
+    matched on), with the display name in parens so the model can map raw
+    mentions like "bench" to the id. Passing bare names made the LLM echo names
+    that never matched slot.exercise_id, silently dropping all telemetry."""
+    return [
+        f"{slot.exercise_id} ({slot.exercise_name})"
+        for day in week.days
+        for slot in day.slots
+        if slot.slot_type in ("main_compound", "secondary_compound")
+    ]
 
 
 @auth_roles.requires_assigned_coach
@@ -2426,12 +2930,7 @@ async def start_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     context.user_data["checkin_history_id"] = history.history_id
     context.user_data["checkin_week_number"] = week.week_number
     context.user_data["checkin_messages"] = []
-    context.user_data["checkin_lift_catalog"] = [
-        slot.exercise_name
-        for day in week.days
-        for slot in day.slots
-        if slot.slot_type in ("main_compound", "secondary_compound")
-    ]
+    context.user_data["checkin_lift_catalog"] = _build_lift_catalog(week)
     context.user_data["checkin_prior_profile"] = (
         client.model_dump_json(indent=2) if client else ""
     )
@@ -2449,21 +2948,12 @@ async def start_checkin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
     if main_slots:
         # Structured mode: iterate per exercise
-        context.user_data["checkin_structured_slots"] = [
-            {"day": d, "exercise_id": s.exercise_id, "exercise_name": s.exercise_name, "rpe": s.rpe}
-            for d, s in main_slots
-        ]
+        context.user_data["checkin_structured_slots"] = _checkin_slot_dicts(main_slots)
         context.user_data["checkin_current_slot_idx"] = 0
         context.user_data["checkin_structured_results"] = {}
 
         first = context.user_data["checkin_structured_slots"][0]
-        await update.message.reply_text(
-            f"📋 *Week {week.week_number} Check-in*\n\n"
-            f"Let's log your main lifts one by one.\n\n"
-            f"*{first['exercise_name']}* ({first['day']}) — what was your top-set weight? (kg, e.g. `100`)",
-            parse_mode="Markdown",
-        )
-        return CHECKIN_EX_WEIGHT
+        return await _prompt_checkin_slot(update.message.reply_text, first, week.week_number)
 
     # If all main slots were already logged, go straight to general notes
     if all_main_slots and not main_slots:
@@ -2513,12 +3003,7 @@ async def handle_checkin_resume(update: Update, context: ContextTypes.DEFAULT_TY
     slots = context.user_data.get("checkin_structured_slots", [])
     if idx < len(slots):
         slot = slots[idx]
-        await query.edit_message_text(
-            f"Resuming — *{slot['exercise_name']}* ({slot['day']}) — "
-            "what was your top-set weight? (kg)",
-            parse_mode="Markdown",
-        )
-        return CHECKIN_EX_WEIGHT
+        return await _prompt_checkin_slot(query.edit_message_text, slot)
 
     await query.edit_message_text("All lifts already logged. Any final notes? (or /skip)")
     return CHECKIN_GENERAL
@@ -2676,11 +3161,7 @@ async def handle_structured_sets(update: Update, context: ContextTypes.DEFAULT_T
 
     next_slot = _structured_advance(context)
     if next_slot:
-        await query.edit_message_text(
-            f"*{next_slot['exercise_name']}* ({next_slot['day']}) — what was your top-set weight? (kg)",
-            parse_mode="Markdown",
-        )
-        return CHECKIN_EX_WEIGHT
+        return await _prompt_checkin_slot(query.edit_message_text, next_slot)
 
     await query.edit_message_text(
         "Almost done! Any other notes — sleep, energy, life stress, or anything else "
@@ -2753,6 +3234,18 @@ async def _process_checkin(
             "Reply with your answers and I'll finish up.",
         )
         return CHECKIN_CLARIFYING
+
+    # Extraction failed entirely — do NOT advance the week or discard telemetry.
+    # The raw messages are already persisted (CheckIn row); tell the client to retry.
+    if extraction is None:
+        logging.getLogger(__name__).warning(
+            "checkin_extraction_failed client_id=%s raw=%r", client_id, raw_text[:500]
+        )
+        await update.message.reply_text(
+            "⚠️ I couldn't read your check-in just now. Your progress is saved — "
+            "please type /checkin and try again in a moment."
+        )
+        return ConversationHandler.END
 
     # Write telemetry back onto the workout JSON
     with Session(engine, expire_on_commit=False) as session:
@@ -3295,15 +3788,15 @@ async def dn_target_rate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def _dn_ask_diet_style(msg_or_query, context, edit: bool = False) -> int:
+    # Single balanced diet style — macros shift by goal (fat-loss leans lower-carb).
+    # No separate vegan/keto/vegetarian/pescatarian styles by product decision.
     keyboard = [
         [InlineKeyboardButton("⚖️ Balanced", callback_data="dn_diet_balanced")],
-        [InlineKeyboardButton("🥩 Omnivore", callback_data="dn_diet_omnivore"),
-         InlineKeyboardButton("🥗 Vegetarian", callback_data="dn_diet_vegetarian")],
-        [InlineKeyboardButton("🌱 Vegan", callback_data="dn_diet_vegan"),
-         InlineKeyboardButton("🐟 Pescatarian", callback_data="dn_diet_pescatarian")],
-        [InlineKeyboardButton("🥚 Keto", callback_data="dn_diet_keto")],
     ]
-    text = "*Step 10 of 18:* What is your dietary style?"
+    text = (
+        "*Step 10 of 18:* Your plan uses a single *balanced* approach, tuned to your "
+        "goal (a fat-loss goal automatically leans lower-carb). Tap to continue."
+    )
     if edit:
         await msg_or_query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
     else:
@@ -3504,6 +3997,24 @@ async def _submit_nutrition(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return ConversationHandler.END
 
 
+def _is_super_admin_user(user_id: int) -> bool:
+    legacy_admin = _admin_chat_id()
+    return auth_roles.is_super_admin(user_id) or (legacy_admin is not None and user_id == legacy_admin)
+
+
+def _coach_authorized_for_client(user_id: int, client_id: str, session: Session) -> bool:
+    """True if user is super-admin or the APPROVED assigned coach of this client."""
+    if _is_super_admin_user(user_id):
+        return True
+    if not client_id:
+        return False
+    client = session.get(ClientProfile, client_id)
+    coach = session.get(CoachProfile, user_id)
+    if client is None or coach is None or coach.status != "approved":
+        return False
+    return client.assigned_coach_id == user_id
+
+
 async def handle_nutrition_approve(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin activates a nutrition plan, generates PDF and emails/notifies client."""
     query = update.callback_query
@@ -3514,6 +4025,10 @@ async def handle_nutrition_approve(update: Update, context: ContextTypes.DEFAULT
         plan = session.get(NutritionPlan, plan_id)
         if not plan:
             await query.edit_message_text("⚠️ Plan not found.")
+            return
+
+        if not _coach_authorized_for_client(update.effective_user.id, plan.client_id, session):
+            await query.edit_message_text("🔒 Not authorized for this client.")
             return
 
         profile = session.get(ClientProfile, plan.client_id)
@@ -3588,6 +4103,9 @@ async def handle_nutrition_discard(update: Update, context: ContextTypes.DEFAULT
     with Session(engine) as session:
         plan = session.get(NutritionPlan, plan_id)
         if plan:
+            if not _coach_authorized_for_client(update.effective_user.id, plan.client_id, session):
+                await query.edit_message_text("🔒 Not authorized for this client.")
+                return
             plan.status = "rejected"
             session.add(plan)
             session.commit()
@@ -3807,6 +4325,42 @@ def _select_checkin_slots(week: WorkoutWeek) -> list[tuple[str, WorkoutSlot]]:
     ]
 
 
+# Equipment tokens that carry an external, progressable load. A "bodyweight" main is one
+# with NO such token (air squat, push-up, pull-up, inverted row) — NOT merely a slot whose
+# target_weight is None: an UNSEEDED barbell main (optional baselines skipped) also has
+# target_weight None, and must still be asked its weight so the autoregulator can progress it.
+_LOADABLE_EQUIP = {
+    "barbell", "dumbbells", "kettlebell", "ez_bar", "trap_bar", "cable_machine",
+    "smith_machine", "leg_press_machine", "leg_extension_machine", "leg_curl_machine",
+}
+
+
+def _checkin_slot_dicts(main_slots) -> list[dict]:
+    """Build the structured check-in slot dicts; flag bodyweight mains by EQUIPMENT (no
+    loadable token), not by target_weight (unseeded barbell mains also have None)."""
+    from app.exercise_db import get_exercise_db
+    eq_by_id = {e["exercise_id"]: e["equipment_required"] for e in get_exercise_db()}
+    out = []
+    for d, s in main_slots:
+        eq = eq_by_id.get(s.exercise_id, [])
+        bodyweight = "bodyweight" in eq and not any(t in _LOADABLE_EQUIP for t in eq)
+        out.append({"day": d, "exercise_id": s.exercise_id, "exercise_name": s.exercise_name,
+                    "rpe": s.rpe, "bodyweight": bodyweight})
+    return out
+
+
+async def _prompt_checkin_slot(send, slot: dict, week_number: int = None) -> int:
+    """Ask weight for a loaded slot, or RPE for a bodyweight slot. Returns the next state."""
+    head = f"📋 *Week {week_number} Check-in*\n\n" if week_number is not None else ""
+    if slot.get("bodyweight"):
+        await send(f"{head}*{slot['exercise_name']}* ({slot['day']}) — what RPE was your top set? "
+                   "(1–10)", parse_mode="Markdown")
+        return CHECKIN_EX_RPE
+    await send(f"{head}*{slot['exercise_name']}* ({slot['day']}) — what was your top-set weight? "
+               "(kg, e.g. `100`)", parse_mode="Markdown")
+    return CHECKIN_EX_WEIGHT
+
+
 def _format_plan_summary(workout: WorkoutWeek) -> str:
     """Compact text summary of a workout week.
 
@@ -4019,6 +4573,26 @@ async def handle_admin_feedback(update: Update, context: ContextTypes.DEFAULT_TY
                 logging.warning("client_not_found: %s", pending.client_id)
                 await update.message.reply_text("❌ Client profile not found.")
                 return ConversationHandler.END
+            from app.domain.workout.equipment import validate_equipment, equipment_alternatives
+            _violations = validate_equipment(new_workout, _feedback_client.available_equipment)
+            if _violations:
+                v = _violations[0]
+                if v.missing == ["<unknown exercise>"]:
+                    await update.message.reply_text(
+                        f"🚫 `{v.exercise_id}` isn't a recognized exercise in our database — "
+                        f"I can't add it. Plan NOT changed.",
+                        parse_mode="Markdown",
+                    )
+                else:
+                    alts = equipment_alternatives(v.exercise_id, _feedback_client.available_equipment)
+                    alt_txt = "\n".join(f"• {a['name']} (`{a['exercise_id']}`)" for a in alts) or "(none in DB)"
+                    await update.message.reply_text(
+                        f"🚫 This plan contains *{v.exercise_name}*, which needs "
+                        f"*{', '.join(v.missing)}* — the client doesn't have it. "
+                        f"Plan NOT changed.\n\nEquipment-valid alternatives:\n{alt_txt}",
+                        parse_mode="Markdown",
+                    )
+                return ConversationHandler.END
             new_msg = llm.generate_coaching_message(_feedback_client, new_workout)
 
             pending.workout_json = new_workout.model_dump_json()
@@ -4031,6 +4605,7 @@ async def handle_admin_feedback(update: Update, context: ContextTypes.DEFAULT_TY
             keyboard = [[
                 InlineKeyboardButton("✅ Approve", callback_data=f"approve:{approval_id}"),
                 InlineKeyboardButton("❌ Reject again", callback_data=f"reject:{approval_id}"),
+                InlineKeyboardButton("➕ Add core", callback_data=f"addcore:{approval_id}"),
             ]]
             edit_log = pending.edit_log or []
             edits_section = ""
@@ -4044,8 +4619,21 @@ async def handle_admin_feedback(update: Update, context: ContextTypes.DEFAULT_TY
                 reply_markup=InlineKeyboardMarkup(keyboard),
             )
         except Exception as exc:
-            logging.error("Coach edit error: %s", exc)
-            await update.message.reply_text("Failed to apply edits. Be more specific.")
+            logging.exception(
+                "apply_coach_edits failed approval_id=%s client_id=%s feedback=%r",
+                approval_id, pending.client_id, feedback,
+            )
+            kind = type(exc).__name__
+            if isinstance(exc, ValueError) and "invalid JSON" in str(exc):
+                reason = "LLM returned malformed JSON."
+            elif isinstance(exc, ValidationError):
+                reason = "LLM output didn't match the workout schema."
+            else:
+                reason = f"{kind}: {str(exc)[:120]}"
+            await update.message.reply_text(
+                f"⚠️ Edit failed — {reason}\n\nTry again with a more specific instruction "
+                f"(e.g. name the day, lift, sets×reps, RPE explicitly)."
+            )
 
     return ConversationHandler.END
 
@@ -4259,6 +4847,171 @@ async def admin_review(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
+# ── Coach "add core at verification" ───────────────────────────────────────────
+
+def _core_choices_for_client(client: ClientProfile) -> list[dict]:
+    """Core exercises whose equipment the client has, deterministically sorted.
+    Falls back to bodyweight core if the client's equipment yields none."""
+    from app.exercise_db import get_exercise_db
+    avail = set(client.available_equipment or [])
+    full = "full_gym" in avail
+    core = [e for e in get_exercise_db() if e.get("primary_muscle") == "core"]
+
+    def _has_equipment(e: dict) -> bool:
+        return full or all(eq in avail for eq in e["equipment_required"])
+
+    choices = [e for e in core if _has_equipment(e)]
+    if not choices:
+        choices = [e for e in core if "bodyweight" in e["equipment_required"]]
+    return sorted(choices, key=lambda e: e["exercise_id"])
+
+
+def _add_core_to_day(week: WorkoutWeek, day_index: int, exercise: dict) -> WorkoutWeek:
+    """Append a deterministic core slot to a day (in place) and return the week."""
+    day = week.days[day_index]
+    rpe = day.slots[0].rpe if day.slots else 7
+    order = max((s.slot_order for s in day.slots), default=0) + 1
+    day.slots.append(WorkoutSlot(
+        slot_order=order,
+        slot_type="isolation",
+        exercise_id=exercise["exercise_id"],
+        exercise_name=exercise["name"],
+        sets=3,
+        reps="10-15",
+        rpe=rpe,
+        rest_seconds=60,
+        coaching_cues=[],
+        warmup_sets=[],
+        biomechanical_focus=exercise.get("biomechanical_focus"),
+    ))
+    day.total_fatigue = day.total_fatigue + exercise.get("fatigue_cost", 1)
+    return week
+
+
+def _review_keyboard(approval_id: str) -> InlineKeyboardMarkup:
+    """Approve / Reject / Add-core keyboard shown on a plan under review."""
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Approve", callback_data=f"approve:{approval_id}"),
+        InlineKeyboardButton("❌ Reject", callback_data=f"reject:{approval_id}"),
+        InlineKeyboardButton("➕ Add core", callback_data=f"addcore:{approval_id}"),
+    ]])
+
+
+def _render_pending_plan_text(pending: "PendingApproval") -> str:
+    """Markdown body for a pending plan under review."""
+    workout = WorkoutWeek.model_validate_json(pending.workout_json)
+    client_summary = _build_client_summary(pending.client_id)
+    submitted = pending.created_at.strftime('%Y-%m-%d %H:%M') if pending.created_at else 'unknown'
+    day_lines = []
+    for day in workout.days:
+        day_lines.append(f"  *{day.day_name}*")
+        for slot in sorted(day.slots, key=lambda s: s.slot_order):
+            wt = f" → {slot.target_weight}kg" if slot.target_weight else ""
+            day_lines.append(
+                f"    {slot.slot_order}. {slot.exercise_name} {slot.sets}×{slot.reps} RPE{slot.rpe}{wt}"
+            )
+    plan_body = "\n".join(day_lines)
+    return (
+        f"🏋️ *Workout Plan — Week {workout.week_number}*  ·  Submitted {submitted}\n\n"
+        f"{client_summary}\n\n"
+        f"────────────────────\n"
+        f"*Programme:*\n{plan_body}"
+    )
+
+
+async def _safe_edit_markdown(query, text, reply_markup=None) -> None:
+    """Edit a callback message as Markdown, falling back to plain text."""
+    try:
+        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=reply_markup)
+    except Exception:
+        await query.edit_message_text(text, reply_markup=reply_markup)
+
+
+async def handle_add_core_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Step 1: coach tapped 'Add core' — show a day picker."""
+    query = update.callback_query
+    await query.answer()
+    approval_id = query.data.split(":", 1)[1]
+    with Session(engine) as session:
+        pending = session.get(PendingApproval, approval_id)
+        if not pending:
+            await query.edit_message_text("❌ Plan no longer pending.")
+            return
+        if not _user_can_act_on_client(update.effective_user.id, pending.client_id):
+            await query.edit_message_text("🔒 Not authorized for this client.")
+            return
+        week = WorkoutWeek.model_validate_json(pending.workout_json)
+    rows = [
+        [InlineKeyboardButton(f"{i + 1}. {d.day_name}", callback_data=f"addcore_d:{approval_id}:{i}")]
+        for i, d in enumerate(week.days)
+    ]
+    rows.append([InlineKeyboardButton("↩️ Back", callback_data=f"addcore_back:{approval_id}")])
+    await query.edit_message_reply_markup(InlineKeyboardMarkup(rows))
+
+
+async def handle_add_core_day(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Step 2: coach picked a day — show core-exercise picker for the client's kit."""
+    query = update.callback_query
+    await query.answer()
+    _, approval_id, di = query.data.split(":")
+    with Session(engine) as session:
+        pending = session.get(PendingApproval, approval_id)
+        if not pending:
+            await query.edit_message_text("❌ Plan no longer pending.")
+            return
+        if not _user_can_act_on_client(update.effective_user.id, pending.client_id):
+            await query.edit_message_text("🔒 Not authorized for this client.")
+            return
+        client = session.get(ClientProfile, pending.client_id)
+    choices = _core_choices_for_client(client) if client else []
+    rows = [
+        [InlineKeyboardButton(e["name"], callback_data=f"addcore_x:{approval_id}:{di}:{xi}")]
+        for xi, e in enumerate(choices)
+    ]
+    rows.append([InlineKeyboardButton("↩️ Back", callback_data=f"addcore:{approval_id}")])
+    await query.edit_message_reply_markup(InlineKeyboardMarkup(rows))
+
+
+async def handle_add_core_exercise(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Step 3: coach picked an exercise — insert it and re-render the plan."""
+    query = update.callback_query
+    await query.answer()
+    _, approval_id, di, xi = query.data.split(":")
+    di, xi = int(di), int(xi)
+    added_name = None
+    with Session(engine) as session:
+        pending = session.get(PendingApproval, approval_id)
+        if not pending:
+            await query.edit_message_text("❌ Plan no longer pending.")
+            return
+        if not _user_can_act_on_client(update.effective_user.id, pending.client_id):
+            await query.edit_message_text("🔒 Not authorized for this client.")
+            return
+        client = session.get(ClientProfile, pending.client_id)
+        choices = _core_choices_for_client(client) if client else []
+        week = WorkoutWeek.model_validate_json(pending.workout_json)
+        if xi >= len(choices) or di >= len(week.days):
+            await query.answer("That option is no longer valid.", show_alert=True)
+            return
+        exercise = choices[xi]
+        added_name = exercise["name"]
+        _add_core_to_day(week, di, exercise)
+        pending.workout_json = week.model_dump_json()
+        session.add(pending)
+        session.commit()
+        session.refresh(pending)
+        text = f"✅ Added *{added_name}* to *{week.days[di].day_name}*.\n\n" + _render_pending_plan_text(pending)
+    await _safe_edit_markdown(query, text, reply_markup=_review_keyboard(approval_id))
+
+
+async def handle_add_core_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Cancel the add-core flow — restore the plan review keyboard."""
+    query = update.callback_query
+    await query.answer()
+    approval_id = query.data.split(":", 1)[1]
+    await query.edit_message_reply_markup(_review_keyboard(approval_id))
+
+
 async def handle_open_pending_item(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Expand a single pending workout plan for the admin to review."""
     query = update.callback_query
@@ -4299,11 +5052,8 @@ async def handle_open_pending_item(update: Update, context: ContextTypes.DEFAULT
         f"────────────────────\n"
         f"*Programme:*\n{plan_body}"
     )
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Approve", callback_data=f"approve:{approval_id}"),
-        InlineKeyboardButton("❌ Reject", callback_data=f"reject:{approval_id}"),
-    ]])
-    await safe_send_markdown(context.bot, query.message.chat_id, msg, reply_markup=keyboard)
+    await safe_send_markdown(context.bot, query.message.chat_id, msg,
+                             reply_markup=_review_keyboard(approval_id))
 
 
 async def admin_review_batch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -4409,14 +5159,58 @@ def _check_rate_limit(client_id: str) -> bool:
 # ── GLOBAL PTB ERROR HANDLER ──────────────────────────────────────────────────
 
 async def handle_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Log all unhandled exceptions and notify the admin (deduplicated, count-edited within 5-min window)."""
-    tb = "".join(traceback.format_exception(type(context.error), context.error, context.error.__traceback__))
+    """Log all unhandled exceptions and notify the admin (deduplicated, count-edited within 5-min window).
+
+    Two error classes are handled specially before the generic traceback-DM path,
+    because both are non-actionable noise that would otherwise flood the admin:
+
+    - ``NetworkError`` (incl. ``TimedOut`` and wrapped ``httpx.ReadError``):
+      transient polling blips. PTB's network_retry_loop already retries and the
+      bot self-recovers — log only, never DM.
+    - ``Conflict`` ("terminated by other getUpdates request"): two processes are
+      polling the same bot token. Operational, not a code bug — send one concise
+      alert (rate-limited 30 min), never the raw traceback.
+    """
+    err = context.error
+    now = time.monotonic()
+    admin_id = _admin_chat_id()
+
+    # Transient network errors: PTB auto-retries. Log, don't alarm.
+    # NOTE: PTB's BadRequest subclasses NetworkError (e.g. "Can't parse entities")
+    # — those are real bugs and must stay on the traceback-DM path, so exclude them.
+    if isinstance(err, NetworkError) and not isinstance(err, BadRequest):
+        logging.warning("transient polling network error: %s", err)
+        return
+
+    # Two pollers on one token. One concise alert per 30 min, no traceback.
+    if isinstance(err, Conflict):
+        logging.error("getUpdates Conflict — another process is polling this token: %s", err)
+        conflict_key = "__conflict__"
+        last = _error_last_sent.get(conflict_key)
+        if last is not None and now - last < 1800:
+            return
+        _error_last_sent[conflict_key] = now
+        _prune_old_entries(_error_last_sent, _error_message_ids, _error_counts)
+        if admin_id is not None:
+            try:
+                await context.bot.send_message(
+                    chat_id=admin_id,
+                    text=(
+                        "⚠️ Conflict: another process is polling this bot token (getUpdates).\n\n"
+                        "Only ONE poller may run per token. Stop any local `python -m app.bot` "
+                        "using the prod token, or remove a duplicate/orphaned container. "
+                        "Use a separate @BotFather dev token for local testing."
+                    ),
+                )
+            except Exception:
+                pass
+        return
+
+    tb = "".join(traceback.format_exception(type(err), err, err.__traceback__))
     logging.error("Unhandled exception:\n%s", tb)
 
-    sig = hashlib.md5(str(context.error)[:200].encode()).hexdigest()
-    now = time.monotonic()
+    sig = hashlib.md5(str(err)[:200].encode()).hexdigest()
     short_tb = tb[-3000:] if len(tb) > 3000 else tb
-    admin_id = _admin_chat_id()
 
     if sig in _error_last_sent and now - _error_last_sent[sig] < 300:
         _error_counts[sig] = _error_counts.get(sig, 1) + 1
@@ -4618,12 +5412,203 @@ async def handle_plan_ack(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await query.answer()
 
     if query.data == "ack_question":
+        # Dead-end branch — now handled by the /ask ConversationHandler entry point.
+        # Kept for safety but should never be reached after the pattern change.
         await query.edit_message_text(
             "Feel free to ask your question anytime — your coach will reply here."
         )
     else:
         label = "Great!" if query.data == "ack_good" else "Noted — keep going!"
         await query.edit_message_text(label)
+
+
+# ── /ask client question flow (SP-C) ─────────────────────────────────────────
+
+def _qa_coach_keyboard(qid: str, has_draft: bool) -> InlineKeyboardMarkup:
+    rows = []
+    if has_draft:
+        rows.append([InlineKeyboardButton("✅ Send draft", callback_data=f"qa_send:{qid}")])
+    rows.append([InlineKeyboardButton("✏️ Edit & send", callback_data=f"qa_edit:{qid}")])
+    rows.append([InlineKeyboardButton("❌ Dismiss", callback_data=f"qa_dismiss:{qid}")])
+    return InlineKeyboardMarkup(rows)
+
+
+async def _dm_coach_question(bot, q) -> None:
+    """Send the coach the question + client background + the DRAFT, with action buttons."""
+    summary = _build_client_summary(q.client_id)
+    draft = q.draft_answer or "[draft unavailable — please answer manually]"
+    text = (
+        f"💬 *New question from your client*\n\n{summary}\n\n"
+        f"*Their question:*\n{q.question_text}\n\n"
+        f"*Suggested draft — ⚠️ DRAFT, review before sending:*\n{draft}"
+    )
+    await safe_send_markdown(bot, q.coach_recipient_id, text,
+                             reply_markup=_qa_coach_keyboard(q.question_id, bool(q.draft_answer)))
+
+
+@auth_roles.requires_active_sub
+async def start_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    """Entry for /ask AND the rewired 'Question' button."""
+    if update.callback_query is not None:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text("What's your question for your coach? (one message)")
+    else:
+        await update.message.reply_text("What's your question for your coach? (one message)")
+    return ASK_QA_QUESTION
+
+
+async def handle_qa_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    import uuid
+    from datetime import datetime, timezone
+    chat_id = update.effective_chat.id
+    client = auth_roles.get_authenticated_client(chat_id)
+    if client is None:
+        await update.message.reply_text("Your chat isn't linked. Tap /start to log in.")
+        return ConversationHandler.END
+    cid = client.client_id
+
+    with Session(engine) as session:
+        pending = session.exec(
+            select(ClientQuestion).where(ClientQuestion.client_id == cid,
+                                         ClientQuestion.status == "pending")
+        ).all()
+    if len(pending) >= _QA_MAX_PENDING:
+        await update.message.reply_text(
+            f"You have {_QA_MAX_PENDING} questions awaiting your coach — please wait for a reply "
+            "before asking more.")
+        return ConversationHandler.END
+
+    question_text = (update.message.text or "").strip()[:_QA_MAX_LEN]
+    if not question_text:
+        await update.message.reply_text("Please type your question.")
+        return ASK_QA_QUESTION
+
+    coach_id = _resolve_review_recipient(cid)
+    if coach_id is None:
+        await update.message.reply_text("No coach is available right now — please try again later.")
+        return ConversationHandler.END
+
+    # latest active plan (optional)
+    latest = None
+    with Session(engine) as session:
+        hist = session.exec(
+            select(WorkoutHistory).where(WorkoutHistory.client_id == cid,
+                                         WorkoutHistory.status == "active")
+            .order_by(WorkoutHistory.week_number.desc())
+        ).first()
+    if hist is not None:
+        try:
+            latest = WorkoutWeek.model_validate_json(hist.workout_json)
+        except Exception:
+            latest = None
+
+    draft = None
+    try:
+        draft = FlashCommunicationService().draft_qa_answer(question_text, client, latest)
+    except Exception:
+        logging.exception("draft_qa_answer failed client_id=%s", cid)
+
+    q = ClientQuestion(question_id=f"q_{uuid.uuid4().hex[:12]}", client_id=cid, client_chat_id=chat_id,
+                       coach_recipient_id=coach_id, question_text=question_text, draft_answer=draft,
+                       status="pending", created_at=datetime.now(timezone.utc))
+    with Session(engine, expire_on_commit=False) as session:
+        session.add(q); session.commit()
+
+    await _dm_coach_question(context.bot, q)
+    await update.message.reply_text("✅ Sent to your coach — they'll reply here.")
+    return ConversationHandler.END
+
+
+# ── Coach Q&A answer flow: Send / Edit / Dismiss + client delivery (SP-C Task 4) ──
+
+async def _deliver_qa_answer(bot, q, text: str) -> bool:
+    """DM the client their coach's answer (or dismissal note). Returns False if unreachable."""
+    chat_id = auth_roles.resolve_primary_chat_id(q.client_id)
+    if chat_id is None:
+        return False
+    await bot.send_message(chat_id=chat_id, text=text)
+    return True
+
+
+def _load_question_for_coach(qid: str, coach_user_id: int):
+    """Load a ClientQuestion if the coach may act on its client; else None + reason."""
+    with Session(engine, expire_on_commit=False) as session:
+        q = session.get(ClientQuestion, qid)
+    if q is None:
+        return None, "❌ Question no longer exists."
+    if not _user_can_act_on_client(coach_user_id, q.client_id):
+        return None, "🔒 Not authorized for this client."
+    if q.status != "pending":
+        return None, "Already handled."
+    return q, None
+
+
+async def _finalise_qa(q, final_answer: str, deliver_text: str, status: str, context) -> None:
+    from datetime import datetime, timezone
+    with Session(engine) as session:
+        row = session.get(ClientQuestion, q.question_id)
+        row.final_answer = final_answer
+        row.status = status
+        row.answered_at = datetime.now(timezone.utc)
+        session.add(row); session.commit()
+    delivered = await _deliver_qa_answer(context.bot, q, deliver_text)
+    if not delivered:
+        await context.bot.send_message(chat_id=q.coach_recipient_id,
+                                       text="⚠️ Couldn't deliver — the client has no linked chat.")
+
+
+async def handle_qa_send(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    qid = query.data.split(":", 1)[1]
+    q, err = _load_question_for_coach(qid, update.effective_user.id)
+    if q is None:
+        await query.edit_message_text(err); return
+    if not q.draft_answer:
+        await query.answer("No draft — use ✏️ Edit & send.", show_alert=True); return
+    await _finalise_qa(q, q.draft_answer, f"💬 Your coach replied:\n\n{q.draft_answer}", "answered", context)
+    await query.edit_message_text("✅ Sent to the client.")
+
+
+async def handle_qa_dismiss(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    qid = query.data.split(":", 1)[1]
+    q, err = _load_question_for_coach(qid, update.effective_user.id)
+    if q is None:
+        await query.edit_message_text(err); return
+    await _finalise_qa(q, None,
+                       "💬 Your coach reviewed your question — no further action needed. Ask anytime with /ask.",
+                       "dismissed", context)
+    await query.edit_message_text("Dismissed (client notified).")
+
+
+async def handle_qa_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    qid = query.data.split(":", 1)[1]
+    q, err = _load_question_for_coach(qid, update.effective_user.id)
+    if q is None:
+        await query.edit_message_text(err)
+        return ConversationHandler.END
+    context.user_data["qa_question_id"] = qid
+    await query.edit_message_text("Type your answer to send to the client:")
+    return QA_COACH_ANSWER
+
+
+async def handle_qa_coach_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    qid = context.user_data.pop("qa_question_id", None)
+    answer = (update.message.text or "").strip()
+    if not qid:
+        await update.message.reply_text("Lost track of the question — please tap Edit again.")
+        return ConversationHandler.END
+    q, err = _load_question_for_coach(qid, update.effective_user.id)
+    if q is None:
+        await update.message.reply_text(err)
+        return ConversationHandler.END
+    await _finalise_qa(q, answer, f"💬 Your coach replied:\n\n{answer}", "answered", context)
+    await update.message.reply_text("✅ Sent to the client.")
+    return ConversationHandler.END
 
 
 # ── /override COMMAND — coach exercise substitution ────────────────────────────
@@ -4689,6 +5674,31 @@ async def handle_override(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return
 
         from_id, to_id = args[1], args[2]
+        from app.domain.workout.equipment import validate_equipment, equipment_alternatives
+        from app.models import WorkoutWeek, WorkoutDay, WorkoutSlot
+        probe = WorkoutWeek(week_number=1, days=[WorkoutDay(
+            day_name="probe",
+            slots=[WorkoutSlot(slot_order=0, slot_type="isolation", exercise_id=to_id,
+                               exercise_name=to_id, sets=1, reps="1", rpe=1)],
+            total_fatigue=1)])
+        bad = validate_equipment(probe, profile.available_equipment)
+        if bad and bad[0].missing == ["<unknown exercise>"]:
+            await update.message.reply_text(
+                f"🚫 Can't set that override: `{to_id}` isn't a recognized exercise "
+                f"in our database.",
+                parse_mode="Markdown",
+            )
+            return
+        if bad:
+            missing = ", ".join(bad[0].missing)
+            alts = equipment_alternatives(to_id, profile.available_equipment)
+            alt_txt = "\n".join(f"  `{a['exercise_id']}` — {a['name']}" for a in alts) or "  (none in DB)"
+            await update.message.reply_text(
+                f"🚫 Can't set that override: `{to_id}` needs *{missing}*, which "
+                f"{profile.name or client_id} doesn't have.\n\nEquipment-valid alternatives:\n{alt_txt}",
+                parse_mode="Markdown",
+            )
+            return
         overrides = dict(profile.coach_overrides or {})
         overrides[from_id] = to_id
         profile.coach_overrides = overrides
@@ -4726,9 +5736,17 @@ async def handle_override_remove(update: Update, context: ContextTypes.DEFAULT_T
 # ── SAFETY CLEARANCE ─────────────────────────────────────────────────────────
 
 async def handle_safety_clear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Admin marks a client as cleared by physician, bypassing the safety gate."""
+    """Admin marks a client as cleared by physician, bypassing the safety gate.
+
+    Medical safety override — restricted to the super-admin even for an
+    assigned coach.
+    """
     query = update.callback_query
     await query.answer()
+
+    if not _is_super_admin_user(update.effective_user.id):
+        await query.edit_message_text("🔒 Only the super-admin can clear a medical safety gate.")
+        return
 
     parts = query.data.split(":", 2)
     client_id, condition_key = parts[1], parts[2]
@@ -4801,6 +5819,9 @@ def main():
         logging.error("No TELEGRAM_BOT_TOKEN found.")
         return
 
+    # Production: refuse to boot on the insecure default JWT secret (forge-able tokens).
+    get_settings().require_secure_secret()
+
     super_admin = auth_roles.super_admin_user_id()
     if super_admin is None:
         logging.error(
@@ -4835,20 +5856,68 @@ def main():
 
     _intake_states = {
         ASK_AVATAR: [CallbackQueryHandler(handle_avatar, pattern=r"^(powerlifter|powerbuilder|gen_pop)$")],
-        ASK_DAYS: [CallbackQueryHandler(handle_days, pattern=r"^(3|4|5|6)$")],
-        ASK_EXPERIENCE: [CallbackQueryHandler(handle_experience, pattern=r"^(beginner|intermediate|advanced)$")],
+        ASK_DAYS: [
+            CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
+            CallbackQueryHandler(handle_days, pattern=r"^(3|4|5|6)$"),
+        ],
+        ASK_EQUIPMENT: [
+            CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
+            CallbackQueryHandler(handle_equipment_preset, pattern=r"^equip_preset:"),
+        ],
+        ASK_EQUIPMENT_CUSTOM: [
+            CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
+            CallbackQueryHandler(handle_equipment_toggle, pattern=r"^equip_toggle_"),
+            CallbackQueryHandler(handle_equipment_confirm, pattern=r"^equip_confirm$"),
+        ],
+        ASK_EQUIPMENT_PULLUP: [
+            CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
+            CallbackQueryHandler(handle_equipment_pullup, pattern=r"^equip_pullup:"),
+        ],
+        ASK_EXPERIENCE: [
+            CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
+            CallbackQueryHandler(handle_experience, pattern=r"^(beginner|intermediate|advanced)$"),
+        ],
+        ASK_ABILITY: [
+            CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
+            CallbackQueryHandler(handle_ability, pattern=r"^(abil:[123]|abil_skip)$"),
+        ],
         ASK_LIMITATIONS: [
+            CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
             CallbackQueryHandler(handle_limitations_toggle, pattern=r"^lim_toggle_"),
             CallbackQueryHandler(handle_limitations_confirm, pattern=r"^lim_confirm$"),
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_limitations),
         ],
-        ASK_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_email)],
-        ASK_LIMITATIONS_OTHER: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_limitations_other)],
+        ASK_EMAIL: [
+            CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_email),
+        ],
+        ASK_LIMITATIONS_OTHER: [
+            CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_limitations_other),
+        ],
+        ASK_BASE_SQUAT: [
+            CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
+            CallbackQueryHandler(handle_base_squat, pattern=r"^base_skip$"),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_base_squat),
+        ],
+        ASK_BASE_BENCH: [
+            CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
+            CallbackQueryHandler(handle_base_bench, pattern=r"^base_skip$"),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_base_bench),
+        ],
+        ASK_BASE_DEADLIFT: [
+            CallbackQueryHandler(handle_intake_back, pattern=r"^intake_back:"),
+            CallbackQueryHandler(handle_base_deadlift, pattern=r"^base_skip$"),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_base_deadlift),
+        ],
     }
 
     _menu_states = {
         MENU_ROOT: [
             CallbackQueryHandler(handle_menu_subscribe, pattern=r"^menu_subscribe$"),
+            CallbackQueryHandler(handle_menu_why, pattern=r"^menu_why$"),
+            CallbackQueryHandler(handle_menu_see_plans, pattern=r"^menu_see_plans$"),
+            CallbackQueryHandler(handle_menu_back, pattern=r"^menu_back$"),
             CallbackQueryHandler(handle_menu_faq, pattern=r"^menu_faq$"),
             CallbackQueryHandler(handle_menu_login, pattern=r"^menu_login$"),
             CallbackQueryHandler(handle_menu_coach, pattern=r"^menu_coach$"),
@@ -4909,6 +5978,10 @@ def main():
             ],
             UPD_LIM_OTHER: [MessageHandler(filters.TEXT & ~filters.COMMAND, upd_lim_other)],
             UPD_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, upd_set_email)],
+            UPD_EQUIPMENT: [
+                CallbackQueryHandler(upd_equipment_toggle, pattern=r"^equip_toggle_"),
+                CallbackQueryHandler(upd_equipment_confirm, pattern=r"^equip_confirm$"),
+            ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
@@ -4960,15 +6033,31 @@ def main():
         per_message=False,
     ))
 
-    # ── Admin: workout reject + form-check tip editing ──
+    # ── Client Q&A: /ask + rewired "❓ Question" button (SP-C) ──
+    app.add_handler(ConversationHandler(
+        entry_points=[
+            CommandHandler("ask", start_ask),
+            CallbackQueryHandler(start_ask, pattern=r"^ack_question$"),
+        ],
+        states={ASK_QA_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_qa_question)]},
+        fallbacks=[CommandHandler("cancel", cancel)],
+        per_message=False,
+        # Auto-END if the client taps "❓ Question" then wanders off, so a later unrelated
+        # message isn't silently captured as a coach question (PTB auto-ENDs on timeout).
+        conversation_timeout=180,
+    ))
+
+    # ── Admin: workout reject + form-check tip editing + coach Q&A answer (SP-C) ──
     app.add_handler(ConversationHandler(
         entry_points=[
             CallbackQueryHandler(handle_admin_reject, pattern=r"^reject:"),
             CallbackQueryHandler(handle_fc_edit, pattern=r"^fc_edit_"),
+            CallbackQueryHandler(handle_qa_edit, pattern=r"^qa_edit:"),
         ],
         states={
             ADMIN_FEEDBACK: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_feedback)],
             FORMCHECK_TIPS_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_fc_tip_edit)],
+            QA_COACH_ANSWER: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_qa_coach_answer)],
         },
         fallbacks=[CommandHandler("cancel", cancel_admin)],
         per_message=False,
@@ -5077,10 +6166,17 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_open_pending_item, pattern=r"^open_pending:"))
     app.add_handler(CallbackQueryHandler(handle_admin_approve, pattern=r"^approve:"))
     app.add_handler(CallbackQueryHandler(handle_admin_approve_confirmed, pattern=r"^approve_confirmed:"))
+    # Coach "add core at verification": pick day -> pick exercise -> re-render review.
+    app.add_handler(CallbackQueryHandler(handle_add_core_day, pattern=r"^addcore_d:"))
+    app.add_handler(CallbackQueryHandler(handle_add_core_exercise, pattern=r"^addcore_x:"))
+    app.add_handler(CallbackQueryHandler(handle_add_core_back, pattern=r"^addcore_back:"))
+    app.add_handler(CallbackQueryHandler(handle_add_core_start, pattern=r"^addcore:"))
     app.add_handler(CallbackQueryHandler(handle_fc_confirm, pattern=r"^fc_confirm_"))
     app.add_handler(CallbackQueryHandler(handle_nutrition_approve, pattern=r"^nutrapprove:"))
     app.add_handler(CallbackQueryHandler(handle_nutrition_discard, pattern=r"^nutrdiscard:"))
-    app.add_handler(CallbackQueryHandler(handle_plan_ack, pattern=r"^ack_"))
+    app.add_handler(CallbackQueryHandler(handle_plan_ack, pattern=r"^ack_(good|ok)$"))
+    app.add_handler(CallbackQueryHandler(handle_qa_send, pattern=r"^qa_send:"))
+    app.add_handler(CallbackQueryHandler(handle_qa_dismiss, pattern=r"^qa_dismiss:"))
     app.add_handler(CallbackQueryHandler(handle_review_toggle, pattern=r"^review_toggle_batch$"))
     app.add_handler(CallbackQueryHandler(handle_override_remove, pattern=r"^override_remove:"))
     app.add_handler(CallbackQueryHandler(handle_safety_clear, pattern=r"^safety_clear:"))

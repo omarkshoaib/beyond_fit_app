@@ -30,7 +30,9 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 def create_access_token(subject: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    return jwt.encode({"sub": subject, "exp": expire}, _secret_key(), algorithm=ALGORITHM)
+    return jwt.encode(
+        {"sub": subject, "exp": expire, "type": "access"}, _secret_key(), algorithm=ALGORITHM
+    )
 
 
 def create_refresh_token(subject: str) -> str:
@@ -39,9 +41,15 @@ def create_refresh_token(subject: str) -> str:
 
 
 def decode_token(token: str) -> Optional[str]:
-    """Decode any token, return subject (`sub`). Returns None on failure."""
+    """Decode an ACCESS token, return subject (`sub`). Returns None on failure.
+
+    Rejects refresh/reset/verify tokens (token-type confusion): only tokens
+    minted by ``create_access_token`` (``type == "access"``) are accepted.
+    """
     try:
         payload = jwt.decode(token, _secret_key(), algorithms=[ALGORITHM])
+        if payload.get("type") != "access":
+            return None
         return payload.get("sub")
     except JWTError:
         return None

@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, Request
-from sqlmodel import Session
+from fastapi import APIRouter, Depends, Request
 
+from app.auth.deps import get_current_user
 from app.models import (
     ClientProfile,
     CoachedWorkoutResponse,
@@ -26,14 +25,25 @@ def list_exercises() -> List[Dict[str, Any]]:
 
 
 @router.post("/generate", response_model=WorkoutWeek)
-def generate_workout(client: ClientProfile, request: Request) -> WorkoutWeek:
+def generate_workout(
+    client: ClientProfile,
+    request: Request,
+    current: ClientProfile = Depends(get_current_user),
+) -> WorkoutWeek:
+    # Attribute generation to the authenticated caller, never an arbitrary body id.
+    client.client_id = current.client_id
     container = request.app.state.container
     generator = WorkoutGenerator(config=container.settings.workout_constants)
     return generator.generate(client)
 
 
 @router.post("/generate_and_coach", response_model=CoachedWorkoutResponse)
-def generate_and_coach(client: ClientProfile, request: Request) -> CoachedWorkoutResponse:
+def generate_and_coach(
+    client: ClientProfile,
+    request: Request,
+    current: ClientProfile = Depends(get_current_user),
+) -> CoachedWorkoutResponse:
+    client.client_id = current.client_id
     container = request.app.state.container
     generator = WorkoutGenerator(config=container.settings.workout_constants)
     workout = generator.generate(client)

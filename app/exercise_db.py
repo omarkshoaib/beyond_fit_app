@@ -39,7 +39,6 @@ EXPANDED_EXERCISES_DATA = [    {        "exercise_id": "bb_back_squat_highbar", 
     {"exercise_id":"bw_tricep_dip","name":"Bench Tricep Dip","movement_pattern":"isolation","primary_muscle":"triceps","secondary_muscles":["front_delts","chest"],"fatigue_cost":2,"equipment_required":["bodyweight","bench"],"avatar_tags":["powerbuilder","gen_pop"],"biomechanical_focus":"lengthened_position"},
     {"exercise_id":"cable_single_arm_reverse_pushdown","name":"Single-Arm Reverse-Grip Tricep Pushdown","movement_pattern":"isolation","primary_muscle":"triceps","secondary_muscles":[],"fatigue_cost":1,"equipment_required":["cable_machine"],"avatar_tags":["powerbuilder","gen_pop"],"biomechanical_focus":"shortened_position"},
     {"exercise_id":"machine_leg_press_calf_raise","name":"Leg Press Calf Raise","movement_pattern":"isolation","primary_muscle":"calves","secondary_muscles":[],"fatigue_cost":2,"equipment_required":["leg_press_machine"],"avatar_tags":["powerbuilder","gen_pop"],"biomechanical_focus":"lengthened_position"},
-    {"exercise_id":"smith_calf_raise","name":"Smith Machine Standing Calf Raise","movement_pattern":"isolation","primary_muscle":"calves","secondary_muscles":[],"fatigue_cost":2,"equipment_required":["smith_machine"],"avatar_tags":["powerbuilder","gen_pop"],"biomechanical_focus":"mid_range"},
     {"exercise_id":"db_single_leg_calf_raise","name":"Single-Leg Dumbbell Calf Raise","movement_pattern":"isolation","primary_muscle":"calves","secondary_muscles":[],"fatigue_cost":1,"equipment_required":["dumbbells"],"avatar_tags":["powerbuilder","gen_pop"],"biomechanical_focus":"lengthened_position"},
     {"exercise_id":"cable_crunch","name":"Cable Crunch","movement_pattern":"isolation","primary_muscle":"core","secondary_muscles":[],"fatigue_cost":2,"equipment_required":["cable_machine"],"avatar_tags":["powerbuilder","gen_pop"],"biomechanical_focus":"shortened_position"},
     {"exercise_id":"cable_woodchopper","name":"Cable Woodchopper","movement_pattern":"isolation","primary_muscle":"core","secondary_muscles":[],"fatigue_cost":1,"equipment_required":["cable_machine"],"avatar_tags":["powerbuilder","gen_pop"],"biomechanical_focus":"mid_range"},
@@ -52,7 +51,6 @@ EXPANDED_EXERCISES_DATA = [    {        "exercise_id": "bb_back_squat_highbar", 
     {"exercise_id":"kb_farmers_carry","name":"Farmer's Carry","movement_pattern":"isolation","primary_muscle":"core","secondary_muscles":["mid_back"],"fatigue_cost":2,"equipment_required":["kettlebell"],"avatar_tags":["powerlifter","powerbuilder","gen_pop"],"biomechanical_focus":"mid_range"},
     {"exercise_id":"bb_pause_squat","name":"Pause Back Squat","movement_pattern":"squat","primary_muscle":"quadriceps","secondary_muscles":["glutes","hamstrings","lower_back"],"fatigue_cost":5,"equipment_required":["barbell","squat_rack"],"avatar_tags":["powerlifter","powerbuilder"],"biomechanical_focus":"lengthened_position"},
     {"exercise_id":"bb_box_squat","name":"Box Squat","movement_pattern":"squat","primary_muscle":"glutes","secondary_muscles":["quadriceps","hamstrings","lower_back"],"fatigue_cost":4,"equipment_required":["barbell","squat_rack","bench"],"avatar_tags":["powerlifter","powerbuilder"],"biomechanical_focus":"mid_range"},
-    {"exercise_id":"machine_leg_extension_single_leg","name":"Single-Leg Leg Extension","movement_pattern":"isolation","primary_muscle":"quadriceps","secondary_muscles":[],"fatigue_cost":2,"equipment_required":["leg_extension_machine"],"avatar_tags":["powerbuilder","gen_pop"],"biomechanical_focus":"shortened_position"},
     {"exercise_id":"bw_sissy_squat","name":"Sissy Squat","movement_pattern":"isolation","primary_muscle":"quadriceps","secondary_muscles":[],"fatigue_cost":2,"equipment_required":["bodyweight"],"avatar_tags":["powerbuilder","gen_pop"],"biomechanical_focus":"lengthened_position"},
     {"exercise_id":"smith_front_squat","name":"Smith Machine Front Squat","movement_pattern":"squat","primary_muscle":"quadriceps","secondary_muscles":["glutes","core"],"fatigue_cost":3,"equipment_required":["smith_machine"],"avatar_tags":["powerbuilder","gen_pop"],"biomechanical_focus":"lengthened_position"},
     {"exercise_id":"machine_pendulum_squat","name":"Pendulum Squat","movement_pattern":"squat","primary_muscle":"quadriceps","secondary_muscles":["glutes"],"fatigue_cost":3,"equipment_required":["leg_press_machine"],"avatar_tags":["powerbuilder","gen_pop"],"biomechanical_focus":"lengthened_position"},
@@ -68,9 +66,6 @@ EXPANDED_EXERCISES_DATA = [    {        "exercise_id": "bb_back_squat_highbar", 
     {"exercise_id":"bb_single_leg_hip_thrust","name":"Single-Leg Barbell Hip Thrust","movement_pattern":"isolation","primary_muscle":"glutes","secondary_muscles":["hamstrings"],"fatigue_cost":2,"equipment_required":["barbell","bench"],"avatar_tags":["powerbuilder","gen_pop"],"biomechanical_focus":"shortened_position"},
     {"exercise_id":"cable_hip_abduction_standing","name":"Standing Cable Hip Abduction","movement_pattern":"isolation","primary_muscle":"glutes","secondary_muscles":[],"fatigue_cost":1,"equipment_required":["cable_machine"],"avatar_tags":["powerbuilder","gen_pop"],"biomechanical_focus":"shortened_position"},
     {"exercise_id":"machine_hip_abduction","name":"Machine Hip Abduction","movement_pattern":"isolation","primary_muscle":"glutes","secondary_muscles":[],"fatigue_cost":1,"equipment_required":["cable_machine"],"avatar_tags":["powerbuilder","gen_pop"],"biomechanical_focus":"shortened_position"},
-    {"exercise_id":"cable_high_to_low_fly","name":"High-to-Low Cable Fly","movement_pattern":"isolation","primary_muscle":"chest","secondary_muscles":["front_delts"],"fatigue_cost":1,"equipment_required":["cable_machine"],"avatar_tags":["powerbuilder","gen_pop"],"biomechanical_focus":"shortened_position"},
-    {"exercise_id":"cable_low_to_high_fly","name":"Low-to-High Cable Fly","movement_pattern":"isolation","primary_muscle":"upper_chest","secondary_muscles":["front_delts"],"fatigue_cost":1,"equipment_required":["cable_machine"],"avatar_tags":["powerbuilder","gen_pop"],"biomechanical_focus":"shortened_position"},
-    {"exercise_id":"db_incline_fly","name":"Incline Dumbbell Fly","movement_pattern":"isolation","primary_muscle":"upper_chest","secondary_muscles":["front_delts"],"fatigue_cost":2,"equipment_required":["dumbbells","bench"],"avatar_tags":["powerbuilder","gen_pop"],"biomechanical_focus":"lengthened_position"},
     {"exercise_id":"db_flat_fly","name":"Flat Dumbbell Fly","movement_pattern":"isolation","primary_muscle":"chest","secondary_muscles":["front_delts"],"fatigue_cost":2,"equipment_required":["dumbbells","bench"],"avatar_tags":["powerbuilder","gen_pop"],"biomechanical_focus":"lengthened_position"},
     {"exercise_id":"cable_rope_lat_pullover","name":"Cable Lat Pullover","movement_pattern":"isolation","primary_muscle":"lats","secondary_muscles":["triceps"],"fatigue_cost":1,"equipment_required":["cable_machine"],"avatar_tags":["powerbuilder","gen_pop"],"biomechanical_focus":"lengthened_position"},
     {"exercise_id":"bb_shrug","name":"Barbell Shrug","movement_pattern":"isolation","primary_muscle":"mid_back","secondary_muscles":[],"fatigue_cost":2,"equipment_required":["barbell"],"avatar_tags":["powerlifter","powerbuilder","gen_pop"],"biomechanical_focus":"shortened_position"},
@@ -80,7 +75,111 @@ EXPANDED_EXERCISES_DATA = [    {        "exercise_id": "bb_back_squat_highbar", 
     {"exercise_id":"bb_front_raise","name":"Barbell Front Raise","movement_pattern":"isolation","primary_muscle":"front_delts","secondary_muscles":[],"fatigue_cost":1,"equipment_required":["barbell"],"avatar_tags":["powerbuilder","gen_pop"],"biomechanical_focus":"mid_range"},
     {"exercise_id":"machine_hip_adduction","name":"Machine Hip Adduction","movement_pattern":"isolation","primary_muscle":"adductors","secondary_muscles":[],"fatigue_cost":1,"equipment_required":["cable_machine"],"avatar_tags":["powerbuilder","gen_pop"],"biomechanical_focus":"lengthened_position"},
     {"exercise_id":"cable_single_leg_curl","name":"Standing Single-Leg Cable Curl","movement_pattern":"isolation","primary_muscle":"hamstrings","secondary_muscles":[],"fatigue_cost":1,"equipment_required":["cable_machine"],"avatar_tags":["powerbuilder","gen_pop"],"biomechanical_focus":"mid_range"},
+    {"exercise_id": "bw_air_squat", "name": "Bodyweight Air Squat",
+     "movement_pattern": "squat", "primary_muscle": "quadriceps",
+     "secondary_muscles": ["glutes", "adductors", "core"], "fatigue_cost": 2,
+     "equipment_required": ["bodyweight"], "avatar_tags": ["gen_pop", "powerbuilder"],
+     "biomechanical_focus": "lengthened_position"},
+    {"exercise_id": "bw_reverse_lunge", "name": "Bodyweight Reverse Lunge",
+     "movement_pattern": "lunge", "primary_muscle": "quadriceps",
+     "secondary_muscles": ["glutes", "hamstrings", "adductors", "core"], "fatigue_cost": 3,
+     "equipment_required": ["bodyweight"], "avatar_tags": ["gen_pop", "powerbuilder"],
+     "biomechanical_focus": "mid_range"},
+    {"exercise_id": "bw_single_leg_rdl", "name": "Bodyweight Single-Leg Romanian Deadlift",
+     "movement_pattern": "hinge", "primary_muscle": "hamstrings",
+     "secondary_muscles": ["glutes", "lower_back", "core"], "fatigue_cost": 2,
+     "equipment_required": ["bodyweight"], "avatar_tags": ["gen_pop", "powerbuilder"],
+     "biomechanical_focus": "lengthened_position"},
+    {"exercise_id": "bw_knee_push_up", "name": "Knee (Modified) Push-Up",
+     "movement_pattern": "horizontal_push", "primary_muscle": "chest",
+     "secondary_muscles": ["triceps", "front_delts", "core"], "fatigue_cost": 1,
+     "equipment_required": ["bodyweight"], "avatar_tags": ["gen_pop"],
+     "biomechanical_focus": "lengthened_position"},
+    {"exercise_id": "bw_inverted_row_bar", "name": "Bar Inverted Row",
+     "movement_pattern": "horizontal_pull", "primary_muscle": "mid_back",
+     "secondary_muscles": ["lats", "biceps", "rear_delts", "core"], "fatigue_cost": 2,
+     "equipment_required": ["pull_up_bar", "bodyweight"], "avatar_tags": ["gen_pop", "powerbuilder"],
+     "biomechanical_focus": "mid_range"},
+    {"exercise_id": "bw_incline_pike_push_up", "name": "Incline (Hands-Elevated) Pike Push-Up",
+     "movement_pattern": "vertical_push", "primary_muscle": "front_delts",
+     "secondary_muscles": ["triceps", "chest", "core"], "fatigue_cost": 1,
+     "equipment_required": ["bodyweight"], "avatar_tags": ["gen_pop"],
+     "biomechanical_focus": "mid_range"},
 ]
 
+# SP-B1: skill+strength difficulty (NOT fatigue). Explicit tiers for the 6 ladder anchors,
+# the isolation/lunge overrides, and the bodyweight-skill exceptions. Everything else falls
+# to _default_tier (whose barbell->4 rule is the beginner-safety backstop).
+DIFFICULTY_TIERS: dict[str, int] = {
+    # squat ladder
+    "bw_air_squat": 2, "db_goblet_squat": 2, "smith_back_squat": 3,
+    "bb_back_squat_highbar": 4, "bb_back_squat_lowbar": 5,
+    # hinge ladder
+    "bw_glute_bridge": 1, "cable_pull_through": 2, "db_romanian_deadlift": 3,
+    "bb_romanian_deadlift": 4, "bb_deadlift_conventional": 4, "bb_deficit_deadlift": 5,
+    # horizontal_push ladder
+    "bw_knee_push_up": 1, "machine_chest_press": 2, "bw_push_up": 3,
+    "db_flat_bench_press": 3, "bb_bench_press": 4, "bw_weighted_dip": 5,
+    # vertical_push ladder
+    "bw_incline_pike_push_up": 2, "smith_shoulder_press": 2, "bw_pike_push_up": 3,
+    "db_seated_shoulder_press": 3, "bb_overhead_press": 4, "bb_push_press": 5,
+    # horizontal_pull ladder
+    "bw_inverted_row_bar": 2, "db_single_arm_row": 3, "db_chest_supported_row": 3,
+    "bb_bent_over_row_pronated": 4, "bb_pendlay_row": 4, "bw_inverted_row_feet_elevated": 5,
+    # vertical_pull ladder
+    "machine_assisted_pull_up": 1, "cable_wide_grip_lat_pulldown": 2,
+    "cable_neutral_grip_lat_pulldown": 3, "bw_pull_up_pronated": 4, "bw_weighted_pull_up": 5,
+    # isolation overrides (rest default to 2)
+    "bw_nordic_curl": 5, "bw_sissy_squat": 4, "bw_l_sit": 4, "bw_toes_to_bar": 3,
+    # --- barbell lunge: lunge branch in _default_tier fires before barbell backstop ---
+    # must be explicit to get >=4 (barbell safety)
+    "bb_reverse_lunge": 4,
+    # --- bodyweight compounds that need explicit tier because _default_tier mis-fires ---
+    # pull_up_bar/dip_station combos: equipment_required != ["bodyweight"] -> default returns 2
+    "bw_chin_up_supinated": 4,    # strict chin-up = barbell-equivalent upper-body demand
+    "bw_weighted_chin_up": 5,     # weighted chin-up = advanced loaded skill
+    # bw_pull_up_pronated, bw_weighted_pull_up already in vertical_pull ladder above
+    # bw_weighted_dip already in horizontal_push ladder above (tier 5)
+    # bw_deficit_push_up: equipment == ["bodyweight"] so default gives 3, but test needs >=4
+    "bw_deficit_push_up": 5,      # deficit ROM push-up = advanced skill/strength (rubric tier 5)
+    # bw_deficit_push_up_bench: ["bodyweight","bench"] -> default gives 2; it's harder than push-up
+    "bw_deficit_push_up_bench": 3,  # hands-elevated deficit (easier variant, tier 3)
+    # bw_single_leg_rdl: bodyweight single-leg hinge -> tier 3 (skill/balance demand)
+    "bw_single_leg_rdl": 3,
+    # free-bar compound NOT tagged "barbell" — would slip the backstop and default to 2:
+    "tb_deadlift": 3,            # trap-bar deadlift — beginner-accessible loaded deadlift
+    # single-leg / unusual-pattern variants that fall through to tier 2 by default:
+    "kb_single_leg_rdl": 3,      # unilateral hinge, balance/skill demand
+    "db_walking_lunge": 3,       # standard loaded lunge (deliberate, not fallthrough)
+    "db_curtsy_lunge": 3,        # cross-behind lunge, balance demand
+    # bw_inverted_row_feet_elevated: already in horizontal_pull ladder above (tier 5)
+    # bb_upright_row: barbell but vertical_pull pattern (not isolation) -> needs >=4
+    # covered by _default_tier barbell->4 IF the lunge trap doesn't apply (it doesn't for vertical_pull)
+    # BUT _default_tier only checks lunge/isolation/barbell/bodyweight in order, so vertical_pull
+    # barbell -> hits "barbell" branch -> returns 4. Safe. No explicit entry needed.
+}
+
+_LUNGE_HARDER = ("bulgarian", "cossack", "single", "lateral", "skater")
+
+
+def _default_tier(e: dict) -> int:
+    """Backstop tier for any exercise not in DIFFICULTY_TIERS."""
+    pat = e["movement_pattern"]
+    if pat == "isolation":
+        return 2
+    if pat == "lunge":
+        name = e["name"].lower()
+        return 3 if any(k in name for k in _LUNGE_HARDER) else 2
+    # compounds on a FREE BAR (barbell/trap-bar/ez-bar) always require proficiency -> >=4
+    # (beginner safety backstop; trap_bar/ez_bar are NOT the literal "barbell" token):
+    if any(b in e["equipment_required"] for b in ("barbell", "trap_bar", "ez_bar")):
+        return 4
+    if e["equipment_required"] == ["bodyweight"]:
+        return 3   # generic bodyweight compound (skill outliers are in DIFFICULTY_TIERS)
+    return 2       # machine / smith / dumbbell / cable guided compound
+
+
 def get_exercise_db() -> List[Dict[str, Any]]:
+    for e in EXPANDED_EXERCISES_DATA:
+        e["difficulty_tier"] = DIFFICULTY_TIERS.get(e["exercise_id"], _default_tier(e))
     return EXPANDED_EXERCISES_DATA

@@ -98,7 +98,8 @@ class NutritionService:
 
         days = []
         used_slugs: dict[str, int] = {}
-        for _ in range(7):
+        validation_warnings: list[str] = []
+        for day_index in range(7):
             day = build_day_plan(
                 food_pool=filtered_pool,
                 target_kcal=target_kcal,
@@ -107,8 +108,20 @@ class NutritionService:
                 target_carb_g=macros["carb_g"],
                 target_fiber_g=macros["fiber_g"],
                 meals_per_day=profile.meals_per_day,
+                day_index=day_index,
                 used_slugs_this_week=used_slugs,
             )
+            day_errors = validate_day(
+                day, target_kcal, macros["protein_g"], macros["fat_g"],
+                macros["fiber_g"], profile.weight_kg, strict=True,
+            )
+            if day_errors:
+                day_errors = validate_day(
+                    day, target_kcal, macros["protein_g"], macros["fat_g"],
+                    macros["fiber_g"], profile.weight_kg, strict=False,
+                )
+            if day_errors:
+                validation_warnings.append(f"Day {day_index + 1}: " + "; ".join(day_errors))
             for slot in day.slots:
                 for food, _ in slot.items:
                     used_slugs[food.slug] = used_slugs.get(food.slug, 0) + 1
@@ -128,6 +141,8 @@ class NutritionService:
             f"BMR={bmr:.0f} kcal | TDEE={tdee:.0f} kcal | "
             f"Target={target_kcal:.0f} kcal | Goal={profile.goal} ({profile.aggressiveness or 'moderate'})"
         )
+        if validation_warnings:
+            rationale += "\n[macro drift] " + " | ".join(validation_warnings)
 
         plan = NutritionPlan(
             client_id=client_id,
@@ -177,6 +192,16 @@ class NutritionService:
             rationale=rationale,
             created_at=datetime.now(timezone.utc),
         )
+
+        # Safety guard: never persist a degenerate ~0-kcal plan (e.g. if the food
+        # pool ever collapses to empty). A real plan totals ~target_kcal/day.
+        total_kcal = sum(d.kcal for d in days)
+        if not days or total_kcal < 0.5 * target_kcal * len(days):
+            raise ValueError(
+                f"Refusing to persist a degenerate nutrition plan: {total_kcal:.0f} kcal "
+                f"across {len(days)} days vs target {target_kcal:.0f}/day — food pool likely empty."
+            )
+
         session.add(plan)
         session.commit()
         session.refresh(plan)

@@ -8,6 +8,8 @@ from .domain.workout.constants import (
     TEMPO_BY_PATTERN,
     CUES_BY_PATTERN,
     HARD_REFUSE_CONDITIONS,
+    SUBSTITUTION_MAP,
+    INJURY_CAVEATS,
 )
 from .domain.workout.warmup import build_warmup
 from .models import WarmupSet
@@ -39,10 +41,14 @@ class AutoRegulator:
         else:
             corrected_baseline = last_weight + (abs(rpe_error) * 0.04 * last_weight)
             
-        # Add next week stimulus 
+        # Add next week stimulus
         target_jump = next_target_rpe - last_target_rpe
         next_target = corrected_baseline + (target_jump * 0.025 * corrected_baseline)
-        
+
+        # Cap the weekly change to ±10% to match the check-in (derive_plan_delta)
+        # path — an uncapped RPE-error correction could jump ~+20% in one week.
+        next_target = max(last_weight * 0.90, min(last_weight * 1.10, next_target))
+
         return round(next_target / 2.5) * 2.5
 
 # Mapping from primary_muscle tags in the DB to canonical budget keys
@@ -134,25 +140,33 @@ class WorkoutGenerator:
 
     # ── Exercise Filtering ─────────────────────────────────────────
     def _filter_exercises(self, client: ClientProfile, **kwargs) -> List[Exercise]:
+        # `avatars`: the set of avatar tags acceptable for THIS slot. Defaults to the
+        # client's own avatar; callers widen it (e.g. a powerlifter's accessory slots
+        # also accept powerbuilder exercises) so the narrow powerlifter pool does not
+        # collapse a day to 2 thin slots. Competition main lifts stay powerlifter-only.
+        avatars = kwargs.pop("avatars", None) or {client.avatar}
         valid_exercises = []
+        banned_patterns = self._banned_patterns(client)
         for ex in self.exercise_db:
-            if client.avatar not in ex.avatar_tags:
+            if not (set(ex.avatar_tags) & avatars):
                 continue
 
+            avail = client.available_equipment or ["full_gym"]   # empty -> wildcard (legacy-safe)
             has_equipment = True
             for eq in ex.equipment_required:
-                if eq not in client.available_equipment and "full_gym" not in client.available_equipment:
+                if eq not in avail and "full_gym" not in avail:
                     has_equipment = False
                     break
             if not has_equipment:
                 continue
 
-            skip = False
-            for limit in client.limitations:
-                if limit == "lower_back_pain" and (ex.movement_pattern == "hinge" or "lower_back" in ex.secondary_muscles):
-                    skip = True
-                    break
-            if skip:
+            if ex.movement_pattern in banned_patterns:
+                continue
+            # lower_back_pain bans both hinge AND squat (per SUBSTITUTION_MAP), substituting
+            # to lunge/horizontal_pull/horizontal_push; also strips lower_back secondary muscles.
+            # Extra lower_back_pain guard: also strip movements loading lower_back
+            # as a secondary muscle (e.g. barbell rows), regardless of pattern.
+            if "lower_back_pain" in client.limitations and "lower_back" in ex.secondary_muscles:
                 continue
 
             if "pattern" in kwargs and ex.movement_pattern != kwargs["pattern"]:
@@ -175,10 +189,38 @@ class WorkoutGenerator:
                 continue
             if "exact_fatigue" in kwargs and ex.fatigue_cost != kwargs["exact_fatigue"]:
                 continue
+            if "max_difficulty" in kwargs and ex.difficulty_tier > kwargs["max_difficulty"]:
+                continue
 
             valid_exercises.append(ex)
 
         return valid_exercises
+
+    def _banned_patterns(self, client: ClientProfile) -> set:
+        """Movement patterns the client's limitations forbid (from SUBSTITUTION_MAP)."""
+        banned: set = set()
+        for lim in client.limitations:
+            sub = SUBSTITUTION_MAP.get(lim)
+            if sub:
+                banned.update(sub.keys())
+        return banned
+
+    def _substitute_patterns(self, client: ClientProfile, pattern: str) -> list:
+        """Safe replacement patterns for a banned pattern, across ALL limitations,
+        excluding any replacement that is itself banned by another limitation.
+
+        Returns [] when no safe replacement exists (all substitutes are themselves
+        banned by a different limitation). Callers should treat an empty return as
+        'no substitute available' — do NOT fall back to the original banned pattern."""
+        banned = self._banned_patterns(client)
+        candidates: list[str] = []
+        for lim in client.limitations:
+            for sub_pat in SUBSTITUTION_MAP.get(lim, {}).get(pattern, []):
+                if sub_pat not in banned and sub_pat not in candidates:
+                    candidates.append(sub_pat)
+        # No safe substitute exists (all replacements are themselves banned) -> empty,
+        # so Tier 5 fills nothing for this slot rather than retrying a banned pattern.
+        return candidates
 
     # ── Budget helpers ─────────────────────────────────────────────
     def _budget_key(self, muscle: str) -> Optional[str]:
@@ -277,6 +319,44 @@ class WorkoutGenerator:
         max_fat = spec.get("max_fat", 5)
         slot_type = spec.get("type", "isolation")
 
+        # Powerlifter accessory/isolation slots may pull from the (much larger)
+        # powerbuilder pool; only the competition main lift stays powerlifter-only.
+        is_main = "main" in slot_type
+        is_compound = slot_type in ("main_compound", "secondary_compound")
+        if client.avatar == "powerlifter" and not is_main:
+            avatars = {"powerlifter", "powerbuilder"}
+        else:
+            avatars = {client.avatar}
+
+        # ── Ability gate (SP-B1 C5) ────────────────────────────────────────
+        # The ladder governs COMPOUND anchor slots only; an isolation slot that carries
+        # an anchor pattern must NOT receive the ladder's heavy compound (it keeps its
+        # fatigue-bounded selection + the difficulty ceiling).
+        from app.domain.workout.ability import LADDERS, client_ability, ladder_rung, global_ability
+        if pattern in LADDERS:
+            ability = client_ability(client.experience_level, client.exercise_ability, pattern)
+            if client.avatar == "powerlifter" and is_main:  # competition mains exempt
+                ability = 5
+            max_diff = ability   # cap ALL anchor-pattern slots (compound AND isolation)
+            # Ladder PICK only for COMPOUND, non-injury-banned slots — an isolation slot
+            # tagged with an anchor pattern keeps its fatigue-bounded selection (capped by
+            # max_diff); a banned anchor pattern falls to the Tier-5 injury substitution.
+            if is_compound and pattern not in self._banned_patterns(client):
+                rung_id = ladder_rung(pattern, ability, client.available_equipment)
+                if rung_id and rung_id not in used_ids:
+                    ex = next((e for e in self.exercise_db if e.exercise_id == rung_id), None)
+                    # The ladder pick bypasses _filter_exercises, so re-apply the SAME
+                    # safety gates it enforces beyond equipment: avatar match + the
+                    # lower_back_pain secondary-muscle guard. If the rung is unsafe, fall
+                    # through to the tier fallback (safe + ability-capped via max_diff).
+                    if ex and (set(ex.avatar_tags) & avatars) and not (
+                        "lower_back_pain" in (client.limitations or [])
+                        and "lower_back" in ex.secondary_muscles
+                    ):
+                        return self._apply_override(ex, client)
+        else:
+            max_diff = global_ability(client.experience_level)
+
         def _pick(candidates: List[Exercise]) -> Optional[Exercise]:
             candidates = [c for c in candidates if c.exercise_id not in used_ids]
             if not candidates:
@@ -285,15 +365,18 @@ class WorkoutGenerator:
 
         # Tier 1: pattern + muscle
         if pattern and muscle:
-            ex = _pick(self._filter_exercises(client, pattern=pattern, primary_muscle=muscle,
-                                              min_fatigue=min_fat, max_fatigue=max_fat))
+            ex = _pick(self._filter_exercises(client, avatars=avatars, pattern=pattern,
+                                              primary_muscle=muscle,
+                                              min_fatigue=min_fat, max_fatigue=max_fat,
+                                              max_difficulty=max_diff))
             if ex:
                 return self._apply_override(ex, client)
 
         # Tier 2: muscle only (drop pattern requirement)
         if muscle:
-            ex = _pick(self._filter_exercises(client, primary_muscle=muscle,
-                                              min_fatigue=min_fat, max_fatigue=max_fat))
+            ex = _pick(self._filter_exercises(client, avatars=avatars, primary_muscle=muscle,
+                                              min_fatigue=min_fat, max_fatigue=max_fat,
+                                              max_difficulty=max_diff))
             if ex:
                 return self._apply_override(ex, client)
 
@@ -301,8 +384,35 @@ class WorkoutGenerator:
         if pattern and muscle:
             mg = self._muscle_group(muscle)
             if mg:
-                ex = _pick(self._filter_exercises(client, pattern=pattern, muscle_group=mg,
-                                                  min_fatigue=min_fat, max_fatigue=max_fat))
+                ex = _pick(self._filter_exercises(client, avatars=avatars, pattern=pattern,
+                                                  muscle_group=mg,
+                                                  min_fatigue=min_fat, max_fatigue=max_fat,
+                                                  max_difficulty=max_diff))
+                if ex:
+                    return self._apply_override(ex, client)
+
+        # Tier 4: last-resort — any exercise for this muscle (or group), dropping
+        # fatigue bounds, so a day never ends up empty/thin when SOME option exists.
+        # NOTE: difficulty ceiling is preserved (never dropped) even at last-resort.
+        if muscle:
+            ex = _pick(self._filter_exercises(client, avatars=avatars, primary_muscle=muscle,
+                                              max_difficulty=max_diff))
+            if ex:
+                return self._apply_override(ex, client)
+            mg = self._muscle_group(muscle)
+            if mg:
+                ex = _pick(self._filter_exercises(client, avatars=avatars, muscle_group=mg,
+                                                  max_difficulty=max_diff))
+                if ex:
+                    return self._apply_override(ex, client)
+
+        # Tier 5: injury substitution — the slot's pattern is banned and no safe
+        # same-muscle option survived the earlier tiers. Fill the slot with a safe
+        # substitute pattern so the day is never left empty.
+        if pattern and pattern in self._banned_patterns(client):
+            for sub_pat in self._substitute_patterns(client, pattern):
+                ex = _pick(self._filter_exercises(client, avatars=avatars, pattern=sub_pat,
+                                                  max_difficulty=max_diff))
                 if ex:
                     return self._apply_override(ex, client)
 
@@ -318,6 +428,7 @@ class WorkoutGenerator:
         prior_week: Optional[WorkoutWeek] = None,
         force_deload: bool = False,
     ) -> WorkoutDay:
+        from app.domain.workout.loadseed import seed_working_load
         deload = force_deload or self._is_deload(client.week_number)
         MAX_FATIGUE: int = self._cfg["session"]["max_fatigue"]
         s = self._cfg["sets"]
@@ -374,6 +485,14 @@ class WorkoutGenerator:
                         continue
                     break
 
+            # Week-1 / no-telemetry seeding: if no prior actual set a target_weight,
+            # seed a conservative starting load from the client's baseline lifts.
+            # The prior-week path above always takes precedence (we only fill a gap).
+            if slot.target_weight is None:
+                seeded = seed_working_load(client, exercise.movement_pattern, reps, slot_rpe)
+                if seeded is not None:
+                    slot.target_weight = seeded
+
             if is_compound:
                 is_main = slot_type == "main_compound" and not first_compound_done[0]
                 last_top: Optional[float] = None
@@ -400,6 +519,12 @@ class WorkoutGenerator:
                 slot.warmup_sets = [WarmupSet(**vars(ws)) for ws in raw_warmup]
                 if is_main:
                     first_compound_done[0] = True
+
+            # Caveat-only limitations: warn on affected patterns without excluding.
+            for lim in client.limitations:
+                spec_cav = INJURY_CAVEATS.get(lim)
+                if spec_cav and exercise.movement_pattern in spec_cav["patterns"]:
+                    slot.coaching_cues = list(slot.coaching_cues) + [spec_cav["cue"]]
 
             return slot
 
@@ -482,9 +607,33 @@ class WorkoutGenerator:
             trigger = "forced" if force_deload else f"week_{client.week_number}_cycle"
             self.last_generation_notes.append(f"deload_week: RPE={rpe} trigger={trigger}")
 
+        # Per-day budget: split each muscle's weekly cap across the days that train
+        # it, so repeated day-types (e.g. 6-day PPL's two Push days) get symmetric
+        # volume instead of the first occurrence greedily eating the week's budget
+        # and later occurrences collapsing to non-trainable sets.
+        import math
+        templates_cfg = self._cfg.get("day_templates", {})
+        days_training_key: Dict[str, int] = {}
+        for day_name in day_templates:
+            tk = self._template_key(day_name)
+            specs = (templates_cfg.get(tk) or templates_cfg.get("Full_Body_A")
+                     or {"slots": []}).get("slots", [])
+            seen_keys = set()
+            for spec in specs:
+                m = spec.get("muscle")
+                k = self._budget_key(m) if m else None
+                if k:
+                    seen_keys.add(k)
+            for k in seen_keys:
+                days_training_key[k] = days_training_key.get(k, 0) + 1
+
         days = []
         for day_name in day_templates:
-            day = self._fill_slots(day_name, client, budget, rpe, prior_week, force_deload=deload)
+            per_day_budget = {
+                k: math.ceil(cap / max(1, days_training_key.get(k, 1)))
+                for k, cap in budget.items()
+            }
+            day = self._fill_slots(day_name, client, per_day_budget, rpe, prior_week, force_deload=deload)
             days.append(day)
 
         week = WorkoutWeek(week_number=client.week_number, days=days)

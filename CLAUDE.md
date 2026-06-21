@@ -93,10 +93,82 @@ A single large in-memory list of exercise dicts (`EXPANDED_EXERCISES_DATA`). Eac
 
 ## Key design constraints
 
-- The workout plan is **always generated deterministically first** — the LLM only formats it into a readable email and optionally mutates it on admin rejection. The LLM never selects exercises.
-- `slot_type = "main_lift"` is referenced in the check-in flow but is **not currently set** by `_fill_slots()` — this is a known gap.
-- The `CoachedWorkoutResponse` model has a field `workout_data` but the route returns `workout=` — there is a field name mismatch between the Pydantic model and the route response.
-- `WorkoutWeek` does not have a `client_id` field, but `test_api.py` asserts `data["workout"]["client_id"] == "999"` — this test will fail against the current model.
+- The workout plan is **always generated deterministically first** — the LLM only formats it into a readable email and optionally mutates it on admin rejection. The LLM never selects exercises. On rejection, `apply_coach_edits()` validates the LLM output as a real `WorkoutWeek` before it can overwrite a live plan.
+- `_fill_slots()` sets `slot_type` per slot index: `main_compound` (slot 0), `secondary_compound` (slot 1), `isolation` (rest). The check-in flow keys off `main_compound`/`secondary_compound`.
+- A powerlifter's accessory/isolation slots draw from the powerbuilder exercise pool (only the competition main lift stays powerlifter-only), so the narrow powerlifter pool no longer collapses days to thin sets.
+- Weekly volume budget is split per-day across the days that train each muscle, so repeated day-types (e.g. 6-day PPL) get symmetric volume.
+- `AutoRegulator.calculate_next_load()` is clamped to ±10% per week.
+- Nutrition is **halal-only** (no non-halal foods stocked; no religious filter) with a **single balanced diet style**; low-carb is goal-integrated (fat-loss leans lower-carb), not a separate style. See the audit report (`AUDIT_REPORT.md`) and `docs/superpowers/plans/2026-06-06-audit-hardening.md`.
+- `CoachedWorkoutResponse.workout` matches the route's `workout=` return; `test_api.py` authenticates and does not assert a `client_id` on the workout. (The previous three bullets here were stale — corrected 2026-06-06.)
+- Declared limitations are honored in exercise selection: `SUBSTITUTION_MAP`
+  (`app/domain/workout/constants.py`) bans unsafe movement patterns
+  (`knee_pain`→squat/lunge, `shoulder_impingement`→overhead/upright-row,
+  `lower_back_pain`→hinge **and back-loaded squat**) in `_filter_exercises`, with a
+  last-resort Tier-5 substitution in `_select_for_slot` so a day is never emptied.
+  `wrist_pain`/`hip_flexor_tightness` add a coaching caveat (`INJURY_CAVEATS`), not an
+  exclusion. NOTE: `lower_back_pain` now also restricts squat (was hinge-only) — a
+  behavior expansion, clinically intended.
+- Week-1 working loads are seeded from optional intake baselines (squat/bench/deadlift
+  → Brzycki e1RM → Tuchscherer RPE/%1RM, rounded down) via
+  `app/domain/workout/loadseed.py`; the prior-week autoregulator takes precedence from
+  week 2, and skipped baselines fall back to rep+RPE guidance.
+- Meal plans rotate per day (`build_day_plan(day_index=...)`) so a 7-day plan draws
+  varied foods, not the same foods every day (the >5×/week cap still applies on top).
+- Each generated nutrition day is gated by `validate_day`; residual drift is
+  non-blocking and surfaced in the plan `rationale` ("[macro drift]") for the coach.
+  The fat check is grounded in the AMDR (fat ≤ 35% of energy), not a tight band around
+  the design target.
+- Equipment is collected at intake (preset menu + 15-item checklist + an explicit
+  pull-up-bar question on the bodyweight path) and editable via `/update_profile` →
+  Equipment, replacing the old hardcoded `["full_gym"]`. The pure module
+  `app/domain/workout/equipment.py` holds the vocabulary, presets, `floor_equipment`
+  (an empty selection floors to `["bodyweight"]` — an empty list would make the
+  generator emit a zero-exercise plan), and `validate_equipment`/`equipment_alternatives`.
+  A legacy/empty `available_equipment` row is treated as `full_gym` at generation
+  (`_filter_exercises`). Intake supports **back navigation** (forward-replay: Back one
+  step, re-tap forward; `handle_intake_back` + `_intake_predecessor`); confirm handlers
+  are idempotent so replay never leaves stale flags.
+- Coach exercise-adds are equipment-guarded by `validate_equipment` on all three
+  `PendingApproval.workout_json` write paths: `/override` is checked at set-time (reject
+  + alternatives), the reject LLM-edit is blocked before it can overwrite a plan, and the
+  initial-generation write flags a mismatch on the coach DM. Add-core
+  (`_core_choices_for_client`) was already equipment-filtered. A bodyweight-only client
+  with no pull-up bar can train no pulling pattern — the coach approval DM flags this.
+  Bodyweight floor exercises: `bw_air_squat`, `bw_reverse_lunge`, `bw_single_leg_rdl`,
+  `bw_knee_push_up`, `bw_inverted_row_bar` (no regression metadata — that is SP-B). See
+  `docs/superpowers/specs/2026-06-20-spa-equipment-back-button-design.md`.
+- Exercise selection is **ability-aware** (SP-B1): every exercise has a `difficulty_tier`
+  (1–5, skill/strength — NOT fatigue; barbell compounds are ≥4 by a safety backstop in
+  `exercise_db._default_tier`, incl. trap_bar/ez_bar). `app/domain/workout/ability.py`
+  holds the 6 `LADDERS` (bodyweight→barbell), `client_ability` (per-family, NULL→experience
+  default), `global_ability` (non-anchor scalar), and `ladder_rung` (highest tier ≤ ability,
+  equipment-valid, floor = lowest rung). A 6-family intake survey sets
+  `ClientProfile.exercise_ability` (Alembic 0021; experience defaults beginner=2 /
+  intermediate=4 / advanced=4, so a no-survey intermediate still gets barbell mains).
+  `_select_for_slot`: a **compound** anchor slot picks the ladder rung (re-validated against
+  avatar + `lower_back_pain` secondary, since the ladder bypasses `_filter_exercises`);
+  isolation slots keep their fatigue-bounded selection; the `max_difficulty` ceiling is
+  threaded through **every** fallback tier and never dropped (so a beginner never gets an
+  above-ability lift). Powerlifter competition mains are exempt (tier 5). A bodyweight main
+  collects RPE (not weight) at check-in. Variation auto-progression over time is **SP-B2**
+  (deferred). See `docs/superpowers/specs/2026-06-20-spb1-ability-regressions-design.md`.
+- Clients can ask their coach a question (SP-C): `/ask` or the (now-live) plan "❓ Question"
+  button → `ClientQuestion` row → `FlashCommunicationService.draft_qa_answer` drafts a
+  recommended answer + `_build_client_summary` background → DM'd to the assigned coach
+  (super-admin fallback via `_resolve_review_recipient`) with **Send draft / Edit & send /
+  Dismiss**. The coach's free-text "Edit & send" state (`QA_COACH_ANSWER`) lives **inside the
+  existing admin/coach ConversationHandler** (not a parallel one) so it never collides with the
+  plan-reject `ADMIN_FEEDBACK` state; the `question_id` rides in `callback_data`. The answer
+  (or a dismissal note — the client always hears back) is DM'd via `resolve_primary_chat_id`.
+  Max 3 pending questions/client; the LLM draft is never auto-sent. Alembic 0022. See
+  `docs/superpowers/specs/2026-06-21-spc-client-coach-qa-design.md`.
+- The pre-payment funnel shows a static pitch before prices (SP-D): **💳 Subscribe** →
+  `WHY_BEYOND_FIT` pitch (`_show_pitch`, returns `MENU_ROOT`) → **💳 See plans**
+  (`handle_menu_see_plans`, the old price-picker body, returns `SUBSCRIBE_PICK_PLAN`) →
+  payment (unchanged). A **✨ Why Beyond Fit?** root-menu button (`handle_menu_why`) reaches
+  the same pitch. `menu_back` is registered in `MENU_ROOT` so the pitch's Back works. Static
+  copy — no LLM/model/migration. See
+  `docs/superpowers/specs/2026-06-21-spd-prepayment-pitch-design.md`.
 
 ## Environment variables
 

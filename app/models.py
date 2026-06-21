@@ -17,6 +17,7 @@ class Exercise(BaseModel):
     equipment_required: List[str]
     avatar_tags: List[str]
     biomechanical_focus: Optional[str] = None
+    difficulty_tier: int = 2
 
 
 class ClientProfile(SQLModel, table=True):
@@ -57,6 +58,8 @@ class ClientProfile(SQLModel, table=True):
     features: Optional[Dict] = Field(default=None, sa_column=Column(JSON))
     # Coach exercise substitution map: {original_exercise_id: replacement_exercise_id}
     coach_overrides: Optional[Dict] = Field(default=None, sa_column=Column(JSON))
+    # Per-family ability tiers from intake survey (SP-B1 C3); NULL -> coerced to experience default
+    exercise_ability: Optional[Dict] = Field(default=None, sa_column=Column(JSON))
     limitations_notes: Optional[str] = Field(default=None)
     safety_override_note: Optional[str] = Field(default=None)
     # ── Safety / health screening fields (Phase 1.7) ──────────────
@@ -70,6 +73,10 @@ class ClientProfile(SQLModel, table=True):
     postpartum_weeks: Optional[int] = Field(default=None)
     unexplained_weight_loss: Optional[bool] = Field(default=None)
     progressive_neuro_deficits: Optional[bool] = Field(default=None)
+    # ── Week-1 load seeding (baseline estimated 1RMs from intake) ──
+    squat_e1rm: Optional[float] = Field(default=None)
+    bench_e1rm: Optional[float] = Field(default=None)
+    deadlift_e1rm: Optional[float] = Field(default=None)
 
 
 class ProfileSnapshot(SQLModel, table=True):
@@ -348,3 +355,17 @@ class ReminderLog(SQLModel, table=True):
     subscription_id: int = Field(index=True, foreign_key="subscription.id")
     kind: str  # "d7" | "d3" | "d1" | "expired"
     sent_at: datetime
+
+
+class ClientQuestion(SQLModel, table=True):
+    """A one-shot client→coach question with an LLM draft and the coach's answer (SP-C)."""
+    question_id: str = Field(primary_key=True)
+    client_id: str = Field(index=True)
+    client_chat_id: int = Field(sa_column=Column(BigInteger))
+    coach_recipient_id: int = Field(sa_column=Column(BigInteger))
+    question_text: str
+    draft_answer: Optional[str] = Field(default=None)
+    final_answer: Optional[str] = Field(default=None)
+    status: str = Field(default="pending")   # pending | answered | dismissed
+    created_at: datetime
+    answered_at: Optional[datetime] = Field(default=None)

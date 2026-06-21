@@ -141,6 +141,8 @@ gunzip -c /var/backups/beyond_fit/<file>.sql.gz | docker compose exec -T db psql
 | PDF send fails | `docker compose logs bot` — WeasyPrint render errors usually mean missing system libs (already in Dockerfile, so impossible inside the container) |
 | LLM call times out | OpenRouter rate-limited or wrong key — check the openrouter.ai dashboard |
 | Postgres healthcheck flaps | Disk full? `df -h`. |
+| `Conflict: terminated by other getUpdates request` | Two processes are polling the **same** bot token — Telegram allows only one. Usually a local `python -m app.bot` (laptop) using the prod token while the server container is up, or an orphaned container. Check `docker compose ps` for duplicates; never run the prod token locally — make a **separate @BotFather dev bot** and put its token in the laptop `.env`. |
+| Flood of `httpx.ReadError` / `NetworkError` | Transient polling blips; PTB auto-retries and recovers. These are logged but no longer DM'd to the admin (since the error-handler change). No action needed unless polling stays down for minutes. |
 
 ## 7. Updating the bot
 

@@ -63,17 +63,10 @@
     {% endif %}
   </div>
 
-  {# Right QR placeholder — renderer embeds base64 PNG #}
+  {# Optional QR column — only rendered when a real video QR is available #}
+  {% if slot.qr_data_uri %}
   <div class="exercise-card__qr">
-    {% if slot.qr_data_uri %}
     <img src="{{ slot.qr_data_uri }}" alt="QR {{ slot.exercise_name }}">
-    {% else %}
-    <div style="width: 52pt; height: 52pt; background: var(--surface);
-                border-radius: 4pt; display: flex; align-items: center;
-                justify-content: center; font-size: 7pt; color: var(--muted);
-                text-align: center; padding: 4pt;">
-      Video<br>Demo
-    </div>
-    {% endif %}
   </div>
+  {% endif %}
 </div>

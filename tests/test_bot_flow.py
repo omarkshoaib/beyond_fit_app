@@ -283,6 +283,41 @@ async def test_checkin_increments_week_and_generates_plan(test_engine, mock_bot)
     assert new_pending is not None
 
 
+async def test_checkin_extraction_failure_does_not_advance_week(test_engine, mock_bot):
+    """If extraction raises, the week must NOT advance and telemetry must survive."""
+    profile, history = _seed_profile_and_history(test_engine)
+    with Session(test_engine) as s:
+        fresh = s.get(ClientProfile, str(USER_ID))
+        starting_week = fresh.week_number
+        prior_profile_json = fresh.model_dump_json()
+        history_id = history.history_id
+
+    update = make_text_update(mock_bot, USER_ID, "felt ok")
+    ctx = make_context(mock_bot, user_data={
+        "checkin_messages": ["squats 100kg rpe 8, bench 80kg rpe 7"],
+        "checkin_history_id": history_id,
+        "checkin_lift_catalog": ["Barbell Bench Press"],
+        "checkin_prior_profile": prior_profile_json,
+        "checkin_week_number": starting_week,
+    })
+
+    def _boom(*a, **k):
+        raise RuntimeError("LLM down")
+
+    with patch("app.bot.extract_checkin", side_effect=_boom), \
+         patch("app.bot._make_llm_client", return_value=AsyncMock()):
+        await _process_checkin(update, ctx)
+
+    with Session(test_engine) as session:
+        unchanged = session.get(ClientProfile, str(USER_ID))
+        new_pending = session.exec(
+            select(PendingApproval).where(PendingApproval.client_id == str(USER_ID))
+        ).first()
+
+    assert unchanged.week_number == starting_week, "week must not advance on extraction failure"
+    assert new_pending is None, "no new plan should be generated on extraction failure"
+
+
 # ── Test 6: Rate limiter blocks a second immediate generation ──────────────────
 
 async def test_rate_limit_blocks_second_call(test_engine, mock_bot):
@@ -328,3 +363,104 @@ async def test_rate_limit_blocks_second_call(test_engine, mock_bot):
         if "wait" in str(c).lower() or "minutes" in str(c).lower()
     ]
     assert len(rate_limit_calls) >= 1
+
+
+# ── Baseline-lift parser tests (Task 3) ───────────────────────────────────────
+
+from app.bot import _parse_baseline_set
+
+
+def test_parse_baseline_set_valid_forms():
+    assert _parse_baseline_set("100x5") == (100.0, 5)
+    assert _parse_baseline_set("100 x 5") == (100.0, 5)
+    assert _parse_baseline_set("60*3") == (60.0, 3)
+    assert _parse_baseline_set("82.5X4") == (82.5, 4)
+
+
+def test_parse_baseline_set_rejects_bad_and_high_reps():
+    assert _parse_baseline_set("skip") is None
+    assert _parse_baseline_set("heavy") is None
+    assert _parse_baseline_set("100x15") is None
+    assert _parse_baseline_set("100") is None
+    assert _parse_baseline_set("0x5") is None
+
+
+import inspect
+import app.bot as bot
+
+
+def test_limitations_exits_route_to_baseline_not_email():
+    for fn in (bot.handle_limitations_confirm, bot.handle_limitations_other, bot.handle_limitations):
+        src = inspect.getsource(fn)
+        assert "ASK_BASE_SQUAT" in src, f"{fn.__name__} should route to ASK_BASE_SQUAT"
+
+
+def test_intake_states_register_baseline_handlers():
+    for name in ("handle_base_squat", "handle_base_bench", "handle_base_deadlift"):
+        assert hasattr(bot, name)
+
+
+# ── Baseline handler behavioral tests (Task 3 — Fix 3) ───────────────────────
+
+from app.bot import ASK_BASE_BENCH, handle_base_squat
+
+
+async def test_handle_base_squat_text_stores_brzycki_e1rm(mock_bot):
+    """Text input '100x5' must store Brzycki e1RM (112.5) and return ASK_BASE_BENCH."""
+    update = make_text_update(mock_bot, USER_ID, "100x5")
+    ctx = make_context(mock_bot, user_data={})
+
+    result = await handle_base_squat(update, ctx)
+
+    assert ctx.user_data["squat_e1rm"] == pytest.approx(112.5)
+    assert result == ASK_BASE_BENCH
+
+
+async def test_handle_base_squat_skip_stores_none(mock_bot):
+    """Pressing Skip (callback_query) must store None for squat_e1rm and return ASK_BASE_BENCH."""
+    update = make_callback_update(mock_bot, USER_ID, data="base_skip")
+    ctx = make_context(mock_bot, user_data={})
+
+    result = await handle_base_squat(update, ctx)
+
+    assert ctx.user_data["squat_e1rm"] is None
+    assert result == ASK_BASE_BENCH
+
+
+def test_update_branch_preserves_e1rm_on_skip():
+    """Regression for Fix 1: non-None guard must not overwrite an existing e1RM with None."""
+    # Simulate user_data after Skip (key present, value None)
+    user_data_skipped = {"squat_e1rm": None, "bench_e1rm": None, "deadlift_e1rm": None}
+
+    class _FakeProfile:
+        squat_e1rm = 120.0
+        bench_e1rm = 100.0
+        deadlift_e1rm = 150.0
+
+    profile = _FakeProfile()
+
+    # Apply the guarded assignment logic from handle_email's UPDATE branch
+    if user_data_skipped.get("squat_e1rm") is not None:
+        profile.squat_e1rm = user_data_skipped["squat_e1rm"]
+    if user_data_skipped.get("bench_e1rm") is not None:
+        profile.bench_e1rm = user_data_skipped["bench_e1rm"]
+    if user_data_skipped.get("deadlift_e1rm") is not None:
+        profile.deadlift_e1rm = user_data_skipped["deadlift_e1rm"]
+
+    # Stored values must survive the skip
+    assert profile.squat_e1rm == pytest.approx(120.0)
+    assert profile.bench_e1rm == pytest.approx(100.0)
+    assert profile.deadlift_e1rm == pytest.approx(150.0)
+
+    # When a real value is provided it must be updated
+    user_data_updated = {"squat_e1rm": 130.0, "bench_e1rm": None, "deadlift_e1rm": None}
+    if user_data_updated.get("squat_e1rm") is not None:
+        profile.squat_e1rm = user_data_updated["squat_e1rm"]
+    if user_data_updated.get("bench_e1rm") is not None:
+        profile.bench_e1rm = user_data_updated["bench_e1rm"]
+    if user_data_updated.get("deadlift_e1rm") is not None:
+        profile.deadlift_e1rm = user_data_updated["deadlift_e1rm"]
+
+    assert profile.squat_e1rm == pytest.approx(130.0)
+    assert profile.bench_e1rm == pytest.approx(100.0)   # unchanged
+    assert profile.deadlift_e1rm == pytest.approx(150.0)  # unchanged

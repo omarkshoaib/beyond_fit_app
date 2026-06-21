@@ -56,8 +56,34 @@ def _make_jinja_env() -> Environment:
 
 # ── CSS loader ────────────────────────────────────────────────────────────────
 
+_FONT_DIR = Path(__file__).parent / "fonts"
+
+# Editorial palette — keep in sync with css/base.css :root tokens.
+_INK = "#211F1C"
+_ACCENT = "#B5532F"
+_GOLD = "#C9A24B"
+_STONE = "#7D7468"
+_GREY = "#8C8479"
+_HAIR = "#E6E1D8"
+
+
+def _font_face_css() -> str:
+    """@font-face blocks with absolute file URLs so bundled OFL fonts render
+    identically in the slim Docker container (no system-font dependency)."""
+    blocks = []
+    for family, fname in (("Fraunces", "Fraunces.ttf"), ("Source Sans 3", "SourceSans3.ttf")):
+        path = (_FONT_DIR / fname).resolve()
+        if path.exists():
+            blocks.append(
+                f"@font-face {{ font-family: '{family}'; "
+                f"src: url('file://{path}') format('truetype'); "
+                f"font-weight: 100 900; font-style: normal; }}"
+            )
+    return "\n".join(blocks) + "\n"
+
+
 def _load_css() -> str:
-    parts = []
+    parts = [_font_face_css()]
     for fname in _CSS_FILES:
         css_path = _CSS_DIR / fname
         if css_path.exists():
@@ -68,67 +94,73 @@ def _load_css() -> str:
 # ── Chart helpers (server-side SVG, no JS) ────────────────────────────────────
 
 def _macro_pie_svg(protein_g: float, fat_g: float, carb_g: float) -> str:
-    """Return a simple inline SVG macro pie chart."""
+    """Slim macro donut (hand-built inline SVG): total kcal centered, legend right."""
     try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-
-        fig, ax = plt.subplots(figsize=(2.5, 2.5))
-        vals = [protein_g * 4, fat_g * 9, carb_g * 4]
-        labels = ["Protein", "Fat", "Carbs"]
-        colors = ["#2F5D50", "#E07856", "#6B9DC2"]
-        ax.pie(vals, labels=labels, colors=colors, autopct="%1.0f%%",
-               textprops={"fontsize": 8}, startangle=90)
-        ax.set_title("Macro Split", fontsize=9, fontweight="bold", pad=4)
-
-        buf = io.BytesIO()
-        fig.savefig(buf, format="svg", bbox_inches="tight")
-        plt.close(fig)
-        svg_bytes = buf.getvalue().decode("utf-8")
-        # Strip XML declaration for inline embedding
-        if svg_bytes.startswith("<?xml"):
-            svg_bytes = svg_bytes[svg_bytes.index("<svg"):]
-        return svg_bytes
+        import math
+        p, f, c = protein_g * 4.0, fat_g * 9.0, carb_g * 4.0
+        total = (p + f + c) or 1.0
+        cx, cy, r, sw = 72.0, 75.0, 52.0, 15.0
+        circ = 2 * math.pi * r
+        kcal = round(p + f + c)
+        segs = [(_ACCENT, p), (_GOLD, c), (_STONE, f)]
+        arcs, offset = [], 0.0
+        for color, val in segs:
+            dash = (val / total) * circ
+            arcs.append(
+                f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="{color}" '
+                f'stroke-width="{sw}" stroke-dasharray="{dash:.2f} {circ - dash:.2f}" '
+                f'stroke-dashoffset="{-offset:.2f}" transform="rotate(-90 {cx} {cy})"/>'
+            )
+            offset += dash
+        legend, leg_svg, ly = [
+            ("Protein", round(protein_g), _ACCENT),
+            ("Carbs", round(carb_g), _GOLD),
+            ("Fat", round(fat_g), _STONE),
+        ], "", 52
+        for name, grams, color in legend:
+            leg_svg += (
+                f'<rect x="158" y="{ly}" width="9" height="9" rx="1.5" fill="{color}"/>'
+                f'<text x="172" y="{ly + 8}" font-size="10.5" fill="{_INK}">{name}</text>'
+                f'<text x="250" y="{ly + 8}" font-size="10.5" fill="{_GREY}" text-anchor="end">{grams}g</text>'
+            )
+            ly += 22
+        return (
+            f'<svg viewBox="0 0 256 150" xmlns="http://www.w3.org/2000/svg" '
+            f'font-family="Source Sans 3, sans-serif">{"".join(arcs)}'
+            f'<text x="{cx}" y="{cy - 1}" text-anchor="middle" font-size="23" '
+            f'font-weight="700" fill="{_INK}">{kcal}</text>'
+            f'<text x="{cx}" y="{cy + 15}" text-anchor="middle" font-size="8.5" '
+            f'fill="{_GREY}" letter-spacing="1.5">KCAL/DAY</text>{leg_svg}</svg>'
+        )
     except Exception as exc:
-        logger.warning("macro_pie_svg failed: %s", exc)
+        logger.warning("macro_donut_svg failed: %s", exc)
         return ""
 
 
 def _volume_bar_svg(workout_week: dict) -> str:
-    """Return an inline SVG showing set volume per day."""
+    """Horizontal set-volume bars per training day (hand-built inline SVG)."""
     try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-
         days = workout_week.get("days", [])
         if not days:
             return ""
-
-        names = [d["day_name"] for d in days]
-        set_counts = [
-            sum(s["sets"] for s in d.get("slots", []))
-            for d in days
-        ]
-
-        fig, ax = plt.subplots(figsize=(5, 1.8))
-        bars = ax.bar(names, set_counts, color="#FF5A1F", alpha=0.85)
-        ax.set_ylabel("Sets", fontsize=8)
-        ax.tick_params(axis="both", labelsize=8)
-        ax.set_ylim(0, max(set_counts) * 1.3 if set_counts else 10)
-        for bar, val in zip(bars, set_counts):
-            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.1,
-                    str(val), ha="center", va="bottom", fontsize=7)
-        fig.tight_layout()
-
-        buf = io.BytesIO()
-        fig.savefig(buf, format="svg", bbox_inches="tight")
-        plt.close(fig)
-        svg = buf.getvalue().decode("utf-8")
-        if svg.startswith("<?xml"):
-            svg = svg[svg.index("<svg"):]
-        return svg
+        rows = [(d["day_name"], sum(s["sets"] for s in d.get("slots", []))) for d in days]
+        maxv = max((v for _, v in rows), default=1) or 1
+        row_h, bar_h, label_w, chart_w = 26, 12, 150, 340
+        width, height = label_w + chart_w + 44, len(rows) * row_h + 14
+        bars, y = "", 12
+        for name, val in rows:
+            bw = (val / maxv) * chart_w
+            bars += (
+                f'<text x="0" y="{y + bar_h - 2}" font-size="10.5" fill="{_INK}">{name}</text>'
+                f'<rect x="{label_w}" y="{y}" width="{chart_w}" height="{bar_h}" rx="2" fill="{_HAIR}"/>'
+                f'<rect x="{label_w}" y="{y}" width="{bw:.1f}" height="{bar_h}" rx="2" fill="{_ACCENT}"/>'
+                f'<text x="{label_w + bw + 6:.1f}" y="{y + bar_h - 2}" font-size="9.5" fill="{_GREY}">{val}</text>'
+            )
+            y += row_h
+        return (
+            f'<svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg" '
+            f'font-family="Source Sans 3, sans-serif">{bars}</svg>'
+        )
     except Exception as exc:
         logger.warning("volume_bar_svg failed: %s", exc)
         return ""

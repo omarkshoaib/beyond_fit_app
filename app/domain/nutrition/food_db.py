@@ -1,6 +1,9 @@
 """
-Curated food database (~150 items) sourced from USDA FoodData Central (CC0).
+Curated halal food database sourced from USDA FoodData Central (CC0).
 Per-100g macros. Suitable for building 3–6 meal/day plans.
+
+Halal-only product: no non-halal items (pork etc.) are stocked, so no
+religious filtering is required downstream.
 
 Categories: protein, grain, veg, fruit, fat, dairy, legume
 """
@@ -15,7 +18,7 @@ _BF = ["breakfast", "snack"]
 FOOD_DB: list[FoodItem] = [
     # ── Proteins ──────────────────────────────────────────────────────────────
     FoodItem("chicken_breast","Chicken Breast (skinless)",165,31,3.6,0,0,"protein",
-             ["vegan"[1:]+"egan"[1:][:0],"omnivore","keto","gluten_free"],[]  ,[], _MAIN, 1, 20, 2, 1.4),
+             ["omnivore","keto","gluten_free"],[],[], _MAIN, 1, 20, 2, 1.4),
     FoodItem("chicken_thigh","Chicken Thigh",209,26,12,0,0,"protein",
              ["omnivore","keto","gluten_free"],[],[],_MAIN,1,25,2,1.3),
     FoodItem("salmon","Atlantic Salmon",208,20,13,0,0,"protein",
@@ -30,8 +33,6 @@ FOOD_DB: list[FoodItem] = [
              ["omnivore","keto","gluten_free"],[],[],_MAIN,2,15,2,1.4),
     FoodItem("beef_sirloin","Beef Sirloin",158,26,5,0,0,"protein",
              ["omnivore","keto","gluten_free"],[],[],_MAIN,3,20,3,1.4),
-    FoodItem("pork_tenderloin","Pork Tenderloin",143,22,4,0,0,"protein",
-             ["omnivore","keto","gluten_free"],[],[],_MAIN,1,20,2,1.3),
     FoodItem("turkey_breast","Turkey Breast",189,29,7,0,0,"protein",
              ["omnivore","keto","gluten_free"],[],[],_MAIN,2,25,2,1.4),
     FoodItem("shrimp","Shrimp",99,24,0.3,0.2,0,"protein",

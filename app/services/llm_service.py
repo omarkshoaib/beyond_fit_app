@@ -30,7 +30,7 @@ class FlashCommunicationService:
             load_dotenv()
             api_key = os.getenv("OPENROUTER_API_KEY", "")
             base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-            model_id = os.getenv("LLM_MODEL_ID", "google/gemini-3.1-flash-lite-preview")
+            model_id = os.getenv("LLM_MODEL_ID", "google/gemini-2.5-flash")
             self._llm = OpenRouterClient(api_key=api_key, base_url=base_url, model_id=model_id)
 
     def generate_coaching_message(self, profile: ClientProfile, workout: WorkoutWeek) -> str:
@@ -82,6 +82,34 @@ class FlashCommunicationService:
         )
         return self._llm.complete(system=system_instruction, user=prompt, temperature=0.3)
 
+    def draft_qa_answer(self, question: str, profile: "ClientProfile",
+                        latest_workout: "WorkoutWeek | None") -> str:
+        """Draft a RECOMMENDED answer to a client's question, grounded in their profile and
+        current plan. This is a DRAFT for the human coach to review — never sent as-is."""
+        system_instruction = (
+            "You are an elite strength & conditioning coach drafting a SUGGESTED reply to a "
+            "client's question, for your head coach to review before it is sent. Ground the "
+            "answer in the client's profile and current plan. Be concise (2-5 sentences), "
+            "specific, and safe; if the question needs medical or in-person assessment, say so "
+            "rather than guessing. Plain text suitable for a messaging app; no preamble."
+        )
+        plan_section = (latest_workout.model_dump_json(indent=2)
+                        if latest_workout is not None else "(no active plan yet)")
+        prompt = (
+            f"CLIENT PROFILE:\n{profile.model_dump_json(indent=2)}\n\n"
+            f"CURRENT PLAN:\n{plan_section}\n\n"
+            f"CLIENT QUESTION:\n{question}\n\n"
+            "Draft the suggested answer."
+        )
+        for attempt in range(3):
+            try:
+                return self._llm.complete(system=system_instruction, user=prompt, temperature=0.4)
+            except Exception as e:
+                if attempt == 2:
+                    raise
+                logger.warning("draft_qa_answer LLM call failed (attempt %d/3): %s", attempt + 1, e)
+                time.sleep(2 ** attempt)
+
     def apply_coach_edits(self, workout_json: str, coach_feedback: str) -> str:
         system_instruction = (
             "You are a programmatic JSON manipulator acting as the backbone of a deterministic coaching app.\n"
@@ -124,5 +152,13 @@ class FlashCommunicationService:
             json.loads(content)  # validate JSON before returning
         except json.JSONDecodeError as e:
             raise ValueError(f"LLM returned invalid JSON: {e}\nContent: {content[:200]}")
+
+        # Validate the edited payload is a structurally-valid WorkoutWeek before it
+        # can overwrite a live plan — a malformed LLM response must not corrupt it.
+        from app.models import WorkoutWeek
+        try:
+            WorkoutWeek.model_validate_json(content)
+        except Exception as e:
+            raise ValueError(f"LLM edit is not a valid WorkoutWeek: {e}\nContent: {content[:200]}")
 
         return content
